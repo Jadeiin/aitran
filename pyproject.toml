@@ -1,0 +1,28 @@
+[project]
+name = "aitran"
+version = "0.1.0"
+description = "Translate PO and XLIFF files using LLMs — supports OpenAI, Anthropic, and 100+ providers via litellm"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "litellm>=1.60",
+    "translate-toolkit>=3.14",
+    "click>=8.1",
+    "rich>=13.0",
+]
+
+[project.scripts]
+aitran = "aitran.cli:app"
+
+[project.urls]
+Repository = "https://github.com/ryanhex53/aitran"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.14",
+]
