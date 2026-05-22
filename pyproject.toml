@@ -1,9 +1,44 @@
 [project]
 name = "aitran"
 version = "0.2.0"
-description = "Translate PO and XLIFF files using LLMs — built on Pydantic AI"
+description = "AI-powered translation for gettext PO and XLIFF files — streaming progress, fuzzy flagging, glossary support, and translator notes for human review"
 readme = "README.md"
+license = {text = "WTFPL"}
 requires-python = ">=3.10"
+authors = [
+    {name = "Jadeiin", email = "92222981+Jadeiin@users.noreply.github.com"},
+]
+keywords = [
+    "ai",
+    "gettext",
+    "i18n",
+    "internationalization",
+    "l10n",
+    "llm",
+    "localization",
+    "po",
+    "translation",
+    "xliff",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: Public Domain",
+    "Natural Language :: Chinese (Simplified)",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Internationalization",
+    "Topic :: Software Development :: Localization",
+    "Topic :: Text Processing :: Linguistic",
+    "Topic :: Utilities",
+]
 dependencies = [
     "translate-toolkit>=3.14",
     "click>=8.1",
@@ -16,6 +51,8 @@ dependencies = [
 aitran = "aitran.cli:app"
 
 [project.urls]
+Homepage = "https://github.com/Jadeiin/aitran"
+Issues = "https://github.com/Jadeiin/aitran/issues"
 Repository = "https://github.com/Jadeiin/aitran"
 
 [build-system]

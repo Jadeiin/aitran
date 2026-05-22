@@ -1,12 +1,10 @@
 # aitran
 
-AI-powered PO/XLIFF translation tool — successor to
-[gpt-po](https://github.com/ryanhex53/gpt-po), built on
-[Pydantic AI](https://ai.pydantic.dev/).
+AI-powered translation for gettext PO and XLIFF files — streaming
+progress, fuzzy flagging, glossary support, and translator notes for
+human review. Successor to [gpt-po](https://github.com/ryanhex53/gpt-po).
 
-Supports OpenAI, Anthropic, and any OpenAI-compatible provider.
-Streaming progress, fuzzy flagging, structured output validation, and
-HTML entity preservation.
+Supports OpenAI, Anthropic, DeepSeek, and any OpenAI-compatible provider.
 
 ## Installation
 
