@@ -59,7 +59,7 @@ Models are specified in `<provider>:<model>` format:
 | Variable | Description |
 |---|---|
 | `AITRAN_API_KEY` / `OPENAI_API_KEY` | API key |
-| `AITRAN_API_HOST` / `OPENAI_API_HOST` | Custom API base URL |
+| `AITRAN_API_HOST` | Custom API base URL |
 | `AITRAN_MODEL` | Default model (default: `deepseek:deepseek-chat`) |
 | `AITRAN_MODEL_TMP` | LLM temperature (default: `0.1`) |
 
