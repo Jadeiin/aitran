@@ -64,8 +64,8 @@ def app(ctx: click.Context) -> None:
     """Aitran — Translate PO and XLIFF files using LLMs.
 
     Built on Pydantic AI. Supports OpenAI, Anthropic, and any OpenAI-compatible
-    provider; specify models as `<provider>:<model>` (e.g. `openai:gpt-4o-mini`,
-    `anthropic:claude-sonnet-4-5`).
+    provider; specify models as `<provider>:<model>` (e.g. `openai:gpt-5.4-mini`,
+    `anthropic:claude-haiku-4-5`).
     """
     if ctx.invoked_subcommand is None:
         ctx.invoke(translate)
@@ -76,8 +76,8 @@ def app(ctx: click.Context) -> None:
     "-m",
     "--model",
     envvar="AITRAN_MODEL",
-    default="openai:gpt-4o-mini",
-    help="Model in <provider>:<model> format (e.g. openai:gpt-4o-mini, anthropic:claude-sonnet-4-5)",
+    default="deepseek:deepseek-chat",
+    help="Model in <provider>:<model> format (e.g. openai:gpt-5.4-mini, anthropic:claude-haiku-4-5)",
 )
 @click.option(
     "-k", "--key", envvar="AITRAN_API_KEY", help="API key for the LLM provider"
@@ -121,7 +121,7 @@ def app(ctx: click.Context) -> None:
 @click.option(
     "--context-length",
     type=int,
-    default=32000,
+    default=4096,
     help="Max accumulated source length per API batch",
 )
 @click.option(
