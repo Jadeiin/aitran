@@ -24,9 +24,8 @@ def _make_po(entries: list[tuple[str, str, str]]) -> str:
             unit.typecomments = "obsolete"
         po_file.addunit(unit)
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".po", delete=False, mode="wb")
-    tmp.write(bytes(po_file))
-    tmp.close()
+    with tempfile.NamedTemporaryFile(suffix=".po", delete=False, mode="wb") as tmp:
+        tmp.write(bytes(po_file))
     return tmp.name
 
 
@@ -111,12 +110,10 @@ def test_remove_reference_contains_plain_text():
     u.addlocation("src/app.py:42")
     po_file.addunit(u)
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".po", delete=False, mode="wb")
-    tmp.write(bytes(po_file))
-    tmp.close()
+    with tempfile.NamedTemporaryFile(suffix=".po", delete=False, mode="wb") as tmp:
+        tmp.write(bytes(po_file))
 
-    remove_by_options(po_path=tmp.name, output=tmp.name,
-                      reference_contains="app.py")
+    remove_by_options(po_path=tmp.name, output=tmp.name, reference_contains="app.py")
 
     po_file = po.pofile.parsefile(tmp.name)
     sources = {u.source for u in po_file.units if not u.isheader()}

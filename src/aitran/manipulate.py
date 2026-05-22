@@ -9,8 +9,8 @@ _FLAG_MAP: dict[str, int] = {
     "m": re.MULTILINE,
     "s": re.DOTALL,
     "u": re.UNICODE,
-    "y": 0,   # sticky — no Python equivalent, ignore
-    "g": 0,   # global — not a regex compile flag in Python, ignore
+    "y": 0,  # sticky — no Python equivalent, ignore
+    "g": 0,  # global — not a regex compile flag in Python, ignore
     "x": re.VERBOSE,
 }
 
@@ -22,6 +22,9 @@ def _parse_reference_filter(
 
     If it matches /pattern/flags, compile a regex. Otherwise treat as plain
     substring match.
+
+    Returns:
+        Compiled regex pattern, plain string, or None.
     """
     m = re.match(r"^/([^/]+)/([igmsuy]*)$", reference_contains)
     if m:
@@ -47,7 +50,9 @@ def remove_by_options(
     """Remove entries from a PO file matching the given filters."""
     po_file = po.pofile.parsefile(po_path)
 
-    ref_filter = _parse_reference_filter(reference_contains) if reference_contains else None
+    ref_filter = (
+        _parse_reference_filter(reference_contains) if reference_contains else None
+    )
 
     to_remove: list[po.pounit] = []
     for unit in po_file.units:
@@ -60,17 +65,22 @@ def remove_by_options(
         is_obs = unit.isobsolete() if hasattr(unit, "isobsolete") else False
 
         remove = False
-        if fuzzy and is_fuzzy:
-            remove = True
-        elif obsolete and is_obs:
-            remove = True
-        elif untranslated and target_empty:
-            remove = True
-        elif translated and not target_empty:
-            remove = True
-        elif translated_not_fuzzy and not target_empty and not is_fuzzy:
-            remove = True
-        elif fuzzy_translated and not target_empty and is_fuzzy:
+        if (
+            fuzzy
+            and is_fuzzy
+            or obsolete
+            and is_obs
+            or untranslated
+            and target_empty
+            or translated
+            and not target_empty
+            or translated_not_fuzzy
+            and not target_empty
+            and not is_fuzzy
+            or fuzzy_translated
+            and not target_empty
+            and is_fuzzy
+        ):
             remove = True
         elif ref_filter is not None:
             locations = unit.getlocations() if hasattr(unit, "getlocations") else []

@@ -7,9 +7,6 @@ def sync(
     po_path: str,
     pot_path: str,
     output_path: str,
-    fold_length: int = 120,
-    sort: bool = False,
-    escape_chars: bool = True,
 ) -> None:
     """Update a PO file from a POT file, keeping existing translations.
 
@@ -20,7 +17,7 @@ def sync(
     pot_file = po.pofile.parsefile(pot_path)
 
     for ctx, entries in pot_file.translations.items():
-        for msgid, unit in entries.items():
+        for msgid in entries:
             if (
                 po_file.translations.get(ctx, {}).get(msgid)
                 and po_file.translations[ctx][msgid].msgstr[0]

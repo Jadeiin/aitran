@@ -7,11 +7,14 @@ from aitran.utils import find_config, normalize_lang_code
 
 
 def load_dictionary(lang: str) -> dict[str, str]:
-    """
-    Load the dictionary for a language. Cascading lookup:
+    """Load the dictionary for a language.
+
+    Cascading lookup:
     1. ~/.aitran/dictionary-{lang}.json
     2. ~/.aitran/dictionary.json (default)
-    Returns {} if no dictionary found.
+
+    Returns:
+        Merged dictionary. Empty dict if no dictionary found.
     """
     lang_code = normalize_lang_code(lang)
     lang_dict_path = find_config(f"dictionary-{lang_code}.json")
@@ -25,23 +28,21 @@ def load_dictionary(lang: str) -> dict[str, str]:
         except (json.JSONDecodeError, OSError):
             pass
 
-    if lang_code:
-        if os.path.exists(lang_dict_path):
-            try:
-                with open(lang_dict_path, encoding="utf-8") as f:
-                    result.update(json.load(f))
-            except (json.JSONDecodeError, OSError):
-                pass
+    if lang_code and os.path.exists(lang_dict_path):
+        try:
+            with open(lang_dict_path, encoding="utf-8") as f:
+                result.update(json.load(f))
+        except (json.JSONDecodeError, OSError):
+            pass
 
     return result
 
 
-def find_matching_entries(
-    sources: list[str], lang: str
-) -> list[tuple[str, str]]:
-    """
-    Find dictionary entries whose key appears as a case-insensitive substring
-    of any source string. Returns list of (key, value) pairs.
+def find_matching_entries(sources: list[str], lang: str) -> list[tuple[str, str]]:
+    """Find dictionary entries whose key appears as a case-insensitive substring.
+
+    Returns:
+        List of (key, value) pairs.
     """
     dictionary = load_dictionary(lang)
     if not dictionary:

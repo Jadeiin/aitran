@@ -1,13 +1,14 @@
 [project]
 name = "aitran"
-version = "0.1.0"
-description = "Translate PO and XLIFF files using LLMs — supports OpenAI, Anthropic, and 100+ providers via litellm"
+version = "0.2.0"
+description = "Translate PO and XLIFF files using LLMs — built on Pydantic AI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "litellm>=1.60",
     "translate-toolkit>=3.14",
     "click>=8.1",
+    "platformdirs>=4.0",
+    "pydantic-ai-slim[anthropic,openai]>=1.0",
     "rich>=13.0",
 ]
 
@@ -21,8 +22,65 @@ Repository = "https://github.com/ryanhex53/aitran"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/aitran"]
+
+[[tool.uv.index]]
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
+default = true
+
+[tool.ruff]
+preview = true
+
+[tool.ruff.lint]
+extend-select = [
+    "C4",   # flake8-comprehensions
+    "D",    # pydocstyle
+    "DOC",  # pydoclint
+    "FA",   # flake8-future-annotations
+    "I",    # isort
+    "Q",    # flake8-quotes
+    "RET",  # flake8-return
+    "SIM",  # flake8-simplify
+    "TC",   # flake8-type-checking
+    "TID",  # flake8-tidy-imports
+    "UP",   # pyupgrade
+    "W",    # pycodestyle warnings
+]
+ignore = [
+    "E402", # Module level import not at top of file
+]
+future-annotations = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "DOC"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
+version_scheme = "pep440"
+version_provider = "uv"
+update_changelog_on_bump = true
+major_version_zero = true
+
 [dependency-groups]
 dev = [
+    {include-group = "lint"},
+    {include-group = "test"},
+]
+lint = [
+    "commitizen>=4.12.1",
+    "prek>=0.3.0",
+    "ruff>=0.14.14",
+]
+test = [
     "pytest>=8.0",
+    "pytest-asyncio>=0.24",
     "pytest-mock>=3.14",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
