@@ -76,7 +76,7 @@ def app(ctx: click.Context) -> None:
     "-m",
     "--model",
     envvar="AITRAN_MODEL",
-    default="deepseek:deepseek-chat",
+    default="deepseek:deepseek-v4-flash",
     help="Model in <provider>:<model> format (e.g. openai:gpt-5.4-mini, anthropic:claude-haiku-4-5)",
 )
 @click.option(

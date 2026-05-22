@@ -49,7 +49,7 @@ aitran --po zh_Hans.po --host https://your-gateway.example.com
 
 Models are specified in `<provider>:<model>` format:
 
-- `deepseek:deepseek-chat` (default)
+- `deepseek:deepseek-v4-flash` (default)
 - `openai:gpt-5.4-mini`
 - `anthropic:claude-haiku-4-5`
 - `anthropic:claude-sonnet-4-5`
@@ -60,7 +60,7 @@ Models are specified in `<provider>:<model>` format:
 |---|---|
 | `AITRAN_API_KEY` / `OPENAI_API_KEY` | API key |
 | `AITRAN_API_HOST` | Custom API base URL |
-| `AITRAN_MODEL` | Default model (default: `deepseek:deepseek-chat`) |
+| `AITRAN_MODEL` | Default model (default: `deepseek:deepseek-v4-flash`) |
 | `AITRAN_MODEL_TMP` | LLM temperature (default: `0.1`) |
 
 ## CLI Reference
