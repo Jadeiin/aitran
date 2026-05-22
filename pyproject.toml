@@ -16,7 +16,7 @@ dependencies = [
 aitran = "aitran.cli:app"
 
 [project.urls]
-Repository = "https://github.com/ryanhex53/aitran"
+Repository = "https://github.com/Jadeiin/aitran"
 
 [build-system]
 requires = ["hatchling"]
