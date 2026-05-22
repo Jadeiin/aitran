@@ -17,6 +17,7 @@ from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers import infer_provider_class
 from pydantic_ai.settings import ModelSettings
 
 if TYPE_CHECKING:
@@ -96,31 +97,42 @@ def build_model(
     base_url: str | None = None,
     temperature: float = 0.1,
 ) -> Model:
-    """Build a Pydantic AI model from a 'provider:model' string.
+    """Build a Pydantic AI model from a ``provider:model`` string.
 
-    Anthropic → AnthropicModel (with instruction-level prompt caching).
-    Everything else → OpenAIChatModel + OpenAIProvider (supports custom
-    base_url for OpenAI-compatible gateways).
+    Provider routing delegates to pydantic-ai's built-in
+    :func:`~pydantic_ai.providers.infer_provider_class`. Known providers
+    (``deepseek``, ``groq``, ``mistral``, etc.) get their dedicated Provider
+    class. Unknown providers fall back to ``OpenAIProvider`` for
+    OpenAI-compatible gateways (supports custom *base_url*).
+
+    Args:
+        model_spec: ``"provider:model_name"`` string.
+        api_key: Optional API key (provider-dependent env var is used when
+            omitted).
+        base_url: Custom base URL (only for ``openai`` / ``openai-chat``
+            providers and unknown gateways).
+        temperature: Model temperature (Anthropic also enables prompt caching).
 
     Returns:
-        A configured Pydantic AI Model instance.
+        A configured Pydantic AI ``Model`` instance.
 
     Raises:
-        ValueError: If model_spec does not contain a colon.
+        ValueError: If *model_spec* does not contain a colon.
     """
     if ":" not in model_spec:
         raise ValueError(
             f"--model must be 'provider:model' (e.g. "
             f"'anthropic:claude-sonnet-4-5'); got {model_spec!r}"
         )
-    provider, name = model_spec.split(":", 1)
+    provider_name, model_name = model_spec.split(":", 1)
 
-    if provider == "anthropic":
+    # Anthropic needs specialised model class + caching settings
+    if provider_name == "anthropic":
         anthropic_provider = (
             AnthropicProvider(api_key=api_key) if api_key else AnthropicProvider()
         )
         return AnthropicModel(
-            name,
+            model_name,
             provider=anthropic_provider,
             settings=AnthropicModelSettings(
                 temperature=temperature,
@@ -129,10 +141,24 @@ def build_model(
             ),
         )
 
-    # Everything else: OpenAI-compatible
+    # All other providers → OpenAIChatModel (accepts any OpenAI-compatible
+    # provider).  Use pydantic-ai's built-in provider class dispatch.
+    try:
+        provider_cls = infer_provider_class(provider_name)
+    except ValueError:
+        # Unknown provider → OpenAI-compatible gateway with custom base_url
+        provider = OpenAIProvider(api_key=api_key, base_url=base_url)
+    else:
+        provider_kwargs: dict = {}
+        if api_key is not None:
+            provider_kwargs["api_key"] = api_key
+        if provider_name in ("openai", "openai-chat") and base_url is not None:
+            provider_kwargs["base_url"] = base_url
+        provider = provider_cls(**provider_kwargs)
+
     return OpenAIChatModel(
-        name,
-        provider=OpenAIProvider(api_key=api_key, base_url=base_url),
+        model_name,
+        provider=provider,
         settings=ModelSettings(temperature=temperature),
     )
 
