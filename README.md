@@ -35,7 +35,7 @@ aitran --po zh_Hans.po
 aitran --po zh_Hans.po -l zh -m anthropic:claude-haiku-4-5
 
 # Translate all PO files in a directory
-aitran --dir ./locales -l zh
+aitran --po-dir ./locales -l zh
 
 # Translate an XLIFF file
 aitran --xliff en_zh-CN.xliff -src en -l zh
@@ -78,9 +78,10 @@ aitran [options]
 | `--host` | Custom API base URL |
 | `-t, --temperature` | LLM temperature (default: 0.1) |
 | `--po` | PO file path |
-| `--dir` | Directory of .po files |
+| `--po-dir` | Directory of .po files |
 | `--xliff` | XLIFF file path |
 | `--xliff-dir` | Directory of .xliff/.xlf files |
+| `--jobs` | Max files to translate concurrently for directory inputs (default: 4) |
 | `-src, --source` | Source language (default: en) |
 | `-l, --lang` | Target language (ISO 639-1) |
 | `-v, --verbose` | Print each translation as it completes |

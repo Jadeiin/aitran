@@ -1,5 +1,7 @@
 """Tests for the Pydantic AI translator agent and file I/O adapters."""
 
+import threading
+import time
 from dataclasses import dataclass
 
 import pytest
@@ -20,6 +22,8 @@ from aitran.translate import (
     PoTranslator,
     XliffTranslator,
     _translate_batch,
+    translate_po_dir,
+    translate_xliff_dir,
 )
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -448,3 +452,83 @@ async def test_translate_batch_unescapes_html_entities():
             on_progress=None,
         )
     assert results[0].target == "点击 <code>btn</code>"
+
+
+def test_translate_po_dir_runs_files_in_parallel(monkeypatch, tmp_path):
+    """Directory PO translation should submit multiple files concurrently."""
+    for name in ("a.po", "b.po", "c.po"):
+        (tmp_path / name).write_text("", encoding="utf-8")
+    (tmp_path / "ignore.txt").write_text("", encoding="utf-8")
+
+    active = 0
+    max_active = 0
+    calls: list[str] = []
+    lock = threading.Lock()
+
+    def fake_translate_po(*args, **_kwargs):
+        nonlocal active, max_active
+        po_path = args[1]
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+            calls.append(po_path)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+
+    monkeypatch.setattr("aitran.translate.translate_po", fake_translate_po)
+
+    translate_po_dir(
+        "provider:model",
+        str(tmp_path),
+        "en",
+        "zh",
+        False,
+        None,
+        4096,
+        jobs=2,
+    )
+
+    assert len(calls) == 3
+    assert max_active == 2
+
+
+def test_translate_xliff_dir_runs_files_in_parallel(monkeypatch, tmp_path):
+    """Directory XLIFF translation should submit multiple files concurrently."""
+    for name in ("a.xlf", "b.xliff", "c.xlf"):
+        (tmp_path / name).write_text("", encoding="utf-8")
+    (tmp_path / "ignore.po").write_text("", encoding="utf-8")
+
+    active = 0
+    max_active = 0
+    calls: list[str] = []
+    lock = threading.Lock()
+
+    def fake_translate_xliff_file(*args, **_kwargs):
+        nonlocal active, max_active
+        xliff_path = args[1]
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+            calls.append(xliff_path)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+
+    monkeypatch.setattr(
+        "aitran.translate.translate_xliff_file", fake_translate_xliff_file
+    )
+
+    translate_xliff_dir(
+        "provider:model",
+        str(tmp_path),
+        "en",
+        "zh",
+        False,
+        None,
+        4096,
+        jobs=2,
+    )
+
+    assert len(calls) == 3
+    assert max_active == 2

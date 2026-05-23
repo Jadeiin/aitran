@@ -62,7 +62,7 @@ def app(ctx: click.Context) -> None:
 )
 @click.option("--po", "po_file", type=click.Path(exists=True), help="PO file path")
 @click.option(
-    "--dir",
+    "--po-dir",
     "po_dir",
     type=click.Path(exists=True, file_okay=False),
     help="Directory of .po files",
@@ -94,6 +94,13 @@ def app(ctx: click.Context) -> None:
     help="Max accumulated source length per API batch",
 )
 @click.option(
+    "--jobs",
+    type=click.IntRange(min=1),
+    default=4,
+    show_default=True,
+    help="Max files to translate concurrently for directory inputs",
+)
+@click.option(
     "-o",
     "--output",
     type=click.Path(),
@@ -113,20 +120,21 @@ def translate(
     verbose: bool,
     context_file: str | None,
     context_length: int,
+    jobs: int,
     output: str | None,
 ) -> None:
     """Translate PO/XLIFF files (default command)."""
     sources = [po_file, po_dir, xliff_file, xliff_dir]
     if not any(sources):
         click.echo(
-            "Error: one of --po, --dir, --xliff, --xliff-dir is required", err=True
+            "Error: one of --po, --po-dir, --xliff, --xliff-dir is required", err=True
         )
         sys.exit(1)
 
     active = [s for s in sources if s]
     if len(active) > 1:
         click.echo(
-            "Error: --po, --dir, --xliff, --xliff-dir are mutually exclusive",
+            "Error: --po, --po-dir, --xliff, --xliff-dir are mutually exclusive",
             err=True,
         )
         sys.exit(1)
@@ -152,6 +160,7 @@ def translate(
     elif po_dir:
         translate_po_dir(
             dir_path=po_dir,
+            jobs=jobs,
             **kwargs,
         )
     elif xliff_file:
@@ -163,6 +172,7 @@ def translate(
     elif xliff_dir:
         translate_xliff_dir(
             dir_path=xliff_dir,
+            jobs=jobs,
             **kwargs,
         )
     else:

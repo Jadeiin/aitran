@@ -6,6 +6,8 @@ import asyncio
 import html
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 import lxml.etree as ET
@@ -39,6 +41,24 @@ def _is_rate_limit(exc: ModelHTTPError) -> bool:
 
 def _is_timeout(exc: ModelHTTPError) -> bool:
     return exc.status_code in (408, 504)
+
+
+def _build_progress(console: Console | None = None) -> Progress:
+    """Create the shared progress renderer used by file translations.
+
+    Returns:
+        Rich progress renderer with file labels.
+    """
+    progress = Progress(
+        TextColumn("[cyan]{task.description}"),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        console=console or Console(),
+    )
+    progress.live.vertical_overflow = "crop"
+    return progress
 
 
 class PoTranslator:
@@ -239,10 +259,12 @@ async def _run_translation_async(
     context_file: str | None,
     context_length: int,
     verbose: bool,
+    progress_label: str,
     *,
     api_key: str | None = None,
     api_host: str | None = None,
     temperature: float = 0.1,
+    progress: Progress | None = None,
 ) -> None:
     """Shared batch loop driving the translator agent."""
     context = _read_context(context_file)
@@ -257,26 +279,42 @@ async def _run_translation_async(
     )
     history: list = []
 
-    console = Console()
-    progress = Progress(
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        console=console,
-    )
-    task_id = progress.add_task("", total=len(units))
+    owns_progress = progress is None
+    progress = progress or _build_progress()
+    console = progress.console
+    task_id = progress.add_task(progress_label, total=len(units))
     global_done = 0
+    batch_streamed: set[int] = set()
+    saved_positions: set[int] = set()
 
     def on_unit_done(src: str, result: TranslatedUnit) -> None:
         nonlocal global_done
+        pos = result.index - 1  # 1-based → 0-based
+        if pos in saved_positions or pos in batch_streamed:
+            return
+        batch_streamed.add(pos)
         global_done += 1
         progress.update(task_id, completed=global_done)
         if verbose:
             src_short = src[:70] + ("…" if len(src) > 70 else "")
             tgt_short = result.target[:60] + ("…" if len(result.target) > 60 else "")
             flag = " [yellow][fuzzy][/]" if result.fuzzy else ""
-            progress.console.print(f"  {src_short} → {tgt_short}{flag}")
+            progress.console.print(
+                f"[cyan]{progress_label}[/] {src_short} → {tgt_short}{flag}"
+            )
+
+    def _commit_batch() -> None:
+        """Mark the current batch's streamed positions as permanently saved."""
+        nonlocal global_done
+        saved_positions.update(batch_streamed)
+        batch_streamed.clear()
+
+    def _rollback_batch() -> None:
+        """Undo progress from a failed batch attempt so the bar reflects reality."""
+        nonlocal global_done
+        global_done -= len(batch_streamed)
+        batch_streamed.clear()
+        progress.update(task_id, completed=global_done)
 
     batch: list = []
     char_count = 0
@@ -286,7 +324,7 @@ async def _run_translation_async(
     batch_retries = 0
     BATCH_MAX_RETRIES = 3
 
-    with progress:
+    with progress if owns_progress else nullcontext():
         while i < len(units):
             if err429:
                 await asyncio.sleep(20)
@@ -318,6 +356,7 @@ async def _run_translation_async(
                     )
                     translator.apply_batch(store, batch, results)
                     translator.save(store, output_path)
+                    _commit_batch()
                     next_start_index += len(batch)
                     batch = []
                     char_count = 0
@@ -336,6 +375,7 @@ async def _run_translation_async(
                     cause = e.__cause__
                     cause_msg = f": {cause}" if cause is not None else ""
                     if batch_retries < BATCH_MAX_RETRIES:
+                        _rollback_batch()
                         console.print(
                             f"\n[yellow]Output validation failed{cause_msg}. "
                             f"Retrying batch "
@@ -347,6 +387,7 @@ async def _run_translation_async(
                         f"{BATCH_MAX_RETRIES} retries{cause_msg}. "
                         f"Skipping {len(batch)} unit(s).[/]"
                     )
+                    _commit_batch()
                     next_start_index += len(batch)
                     batch = []
                     char_count = 0
@@ -366,10 +407,12 @@ def _run_translation(
     context_file: str | None,
     context_length: int,
     verbose: bool,
+    progress_label: str,
     *,
     api_key: str | None = None,
     api_host: str | None = None,
     temperature: float = 0.1,
+    progress: Progress | None = None,
 ) -> None:
     asyncio.run(
         _run_translation_async(
@@ -383,9 +426,11 @@ def _run_translation(
             context_file=context_file,
             context_length=context_length,
             verbose=verbose,
+            progress_label=progress_label,
             api_key=api_key,
             api_host=api_host,
             temperature=temperature,
+            progress=progress,
         )
     )
 
@@ -403,6 +448,7 @@ def translate_po(
     api_key: str | None = None,
     api_host: str | None = None,
     temperature: float = 0.1,
+    progress: Progress | None = None,
 ) -> None:
     """Translate a single PO file."""
     translator = PoTranslator()
@@ -437,11 +483,12 @@ def translate_po(
         context_file=context_file,
         context_length=context_length,
         verbose=verbose,
+        progress_label=os.path.basename(output_path),
         api_key=api_key,
         api_host=api_host,
         temperature=temperature,
+        progress=progress,
     )
-    print()
 
 
 def translate_po_dir(
@@ -452,17 +499,28 @@ def translate_po_dir(
     verbose: bool,
     context_file: str | None,
     context_length: int,
+    jobs: int = 4,
     *,
     api_key: str | None = None,
     api_host: str | None = None,
     temperature: float = 0.1,
 ) -> None:
     """Translate all .po files in a directory."""
-    for entry in sorted(os.listdir(dir_path)):
-        if entry.endswith(".po"):
-            po_path = os.path.join(dir_path, entry)
-            print(f"Translating {po_path}")
-            translate_po(
+    po_paths = [
+        os.path.join(dir_path, entry)
+        for entry in sorted(os.listdir(dir_path))
+        if entry.endswith(".po")
+    ]
+    if not po_paths:
+        print("No .po files found.")
+        return
+
+    max_workers = min(jobs, len(po_paths))
+    progress = _build_progress()
+    with progress, ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                translate_po,
                 model,
                 po_path,
                 source_lang,
@@ -474,7 +532,12 @@ def translate_po_dir(
                 api_key=api_key,
                 api_host=api_host,
                 temperature=temperature,
-            )
+                progress=progress,
+            ): po_path
+            for po_path in po_paths
+        }
+        for future in as_completed(futures):
+            future.result()
 
 
 def translate_xliff_file(
@@ -490,6 +553,7 @@ def translate_xliff_file(
     api_key: str | None = None,
     api_host: str | None = None,
     temperature: float = 0.1,
+    progress: Progress | None = None,
 ) -> None:
     """Translate a single XLIFF file."""
     translator = XliffTranslator()
@@ -532,11 +596,12 @@ def translate_xliff_file(
         context_file=context_file,
         context_length=context_length,
         verbose=verbose,
+        progress_label=os.path.basename(output_path),
         api_key=api_key,
         api_host=api_host,
         temperature=temperature,
+        progress=progress,
     )
-    print()
 
 
 def translate_xliff_dir(
@@ -547,17 +612,28 @@ def translate_xliff_dir(
     verbose: bool,
     context_file: str | None,
     context_length: int,
+    jobs: int = 4,
     *,
     api_key: str | None = None,
     api_host: str | None = None,
     temperature: float = 0.1,
 ) -> None:
     """Translate all .xliff/.xlf files in a directory."""
-    for entry in sorted(os.listdir(dir_path)):
-        if entry.endswith((".xliff", ".xlf")):
-            xliff_path = os.path.join(dir_path, entry)
-            print(f"Translating {xliff_path}")
-            translate_xliff_file(
+    xliff_paths = [
+        os.path.join(dir_path, entry)
+        for entry in sorted(os.listdir(dir_path))
+        if entry.endswith((".xliff", ".xlf"))
+    ]
+    if not xliff_paths:
+        print("No .xliff/.xlf files found.")
+        return
+
+    max_workers = min(jobs, len(xliff_paths))
+    progress = _build_progress()
+    with progress, ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                translate_xliff_file,
                 model,
                 xliff_path,
                 source_lang,
@@ -569,4 +645,9 @@ def translate_xliff_dir(
                 api_key=api_key,
                 api_host=api_host,
                 temperature=temperature,
-            )
+                progress=progress,
+            ): xliff_path
+            for xliff_path in xliff_paths
+        }
+        for future in as_completed(futures):
+            future.result()
