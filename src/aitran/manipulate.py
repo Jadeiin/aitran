@@ -45,7 +45,6 @@ def remove_by_options(
     translated_not_fuzzy: bool = False,
     fuzzy_translated: bool = False,
     reference_contains: str | None = None,
-    compile_opts: dict | None = None,
 ) -> None:
     """Remove entries from a PO file matching the given filters."""
     po_file = po.pofile.parsefile(po_path)
@@ -66,20 +65,12 @@ def remove_by_options(
 
         remove = False
         if (
-            fuzzy
-            and is_fuzzy
-            or obsolete
-            and is_obs
-            or untranslated
-            and target_empty
-            or translated
-            and not target_empty
-            or translated_not_fuzzy
-            and not target_empty
-            and not is_fuzzy
-            or fuzzy_translated
-            and not target_empty
-            and is_fuzzy
+            (fuzzy and is_fuzzy)
+            or (obsolete and is_obs)
+            or (untranslated and target_empty)
+            or (translated and not target_empty)
+            or (translated_not_fuzzy and not target_empty and not is_fuzzy)
+            or (fuzzy_translated and not target_empty and is_fuzzy)
         ):
             remove = True
         elif ref_filter is not None:

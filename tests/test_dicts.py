@@ -14,7 +14,7 @@ def test_load_empty_when_no_dictionary(monkeypatch, tmp_path):
     monkeypatch.setattr(
         platformdirs,
         "user_config_dir",
-        lambda appname, ensure_exists=False: str(empty),
+        lambda *_args, **_kwargs: str(empty),
     )
 
     result = load_dictionary("zz")
@@ -31,7 +31,7 @@ def test_find_matching_entries_basic(monkeypatch, tmp_path):
     monkeypatch.setattr(
         platformdirs,
         "user_config_dir",
-        lambda appname, ensure_exists=False: str(dict_dir),
+        lambda *_args, **_kwargs: str(dict_dir),
     )
 
     sources = ["Hello world", "hello there"]
@@ -50,7 +50,7 @@ def test_find_matching_entries_no_match(monkeypatch, tmp_path):
     monkeypatch.setattr(
         platformdirs,
         "user_config_dir",
-        lambda appname, ensure_exists=False: str(dict_dir),
+        lambda *_args, **_kwargs: str(dict_dir),
     )
 
     result = find_matching_entries(["hello world"], "zz")

@@ -12,15 +12,16 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelRetry, RunContext, format_as_xml
+from pydantic_ai import Agent, ModelRetry, format_as_xml
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers import infer_provider_class
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
-from pydantic_ai.providers import infer_provider_class
 from pydantic_ai.settings import ModelSettings
 
 if TYPE_CHECKING:
+    from pydantic_ai import RunContext
     from pydantic_ai.models import Model
 
 from aitran.prompts import load_system_prompt, load_user_prompt

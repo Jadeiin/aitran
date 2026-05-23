@@ -10,10 +10,10 @@ Supports OpenAI, Anthropic, DeepSeek, and any OpenAI-compatible provider.
 
 ```bash
 # Recommended: uv
-uv tool install aitran
+uv tool install git+https://github.com/Jadeiin/aitran
 
 # Or pip
-pip install aitran
+pip install git+https://github.com/Jadeiin/aitran
 ```
 
 Set your API key:

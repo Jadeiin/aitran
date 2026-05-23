@@ -1,5 +1,7 @@
 """Tests for the Pydantic AI translator agent and file I/O adapters."""
 
+from dataclasses import dataclass
+
 import pytest
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import FunctionModel
@@ -23,13 +25,11 @@ from aitran.translate import (
 # ── Helpers ──────────────────────────────────────────────────────
 
 
+@dataclass
 class FakeUnit:
-    def __init__(
-        self, source: str, context: str | None = None, comment: str | None = None
-    ):
-        self.source = source
-        self.context = context
-        self.comment = comment
+    source: str
+    context: str | None = None
+    comment: str | None = None
 
 
 def _make_deps(expected_indices=(1, 2)):
@@ -124,13 +124,18 @@ async def test_translate_batch_retries_on_missing_index():
 
     call_count = 0
 
-    async def stream_fn(messages, agent_info):
+    async def stream_fn(_messages, _agent_info):  # noqa: RUF029
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            yield '{"translations":[{"index":1,"target":"ok","fuzzy":false}]}'
+            yield ('{"translations":[{"index":1,"target":"ok","fuzzy":false}]}')
         else:
-            yield '{"translations":[{"index":1,"target":"ok","fuzzy":false},{"index":2,"target":"yes","fuzzy":false}]}'
+            yield (
+                '{"translations":['
+                '{"index":1,"target":"ok","fuzzy":false},'
+                '{"index":2,"target":"yes","fuzzy":false}'
+                "]}"
+            )
 
     fn_model = FunctionModel(stream_function=stream_fn)
     agent = build_translator_agent(fn_model)
@@ -386,13 +391,18 @@ async def test_translate_batch_rejects_extra_indices():
     """Model returns an index not in the request — should trigger ModelRetry."""
     call_count = 0
 
-    async def stream_fn(messages, agent_info):
+    async def stream_fn(_messages, _agent_info):  # noqa: RUF029
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            yield '{"translations":[{"index":1,"target":"ok","fuzzy":false},{"index":99,"target":"bogus","fuzzy":false}]}'
+            yield (
+                '{"translations":['
+                '{"index":1,"target":"ok","fuzzy":false},'
+                '{"index":99,"target":"bogus","fuzzy":false}'
+                "]}"
+            )
         else:
-            yield '{"translations":[{"index":1,"target":"ok","fuzzy":false}]}'
+            yield ('{"translations":[{"index":1,"target":"ok","fuzzy":false}]}')
 
     fn_model = FunctionModel(stream_function=stream_fn)
     agent = build_translator_agent(fn_model)

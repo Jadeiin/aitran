@@ -23,40 +23,6 @@ from aitran.utils import (
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 
-def _get_compile_options(po_fold_len: str, po_sort: bool, po_esc_chars: bool) -> dict:
-    """Parse PO compile options from CLI args.
-
-    Returns:
-        Dict with fold_length, sort_output, escape_chars keys.
-    """
-    try:
-        fold_len = 0 if po_fold_len.lower() == "false" else int(po_fold_len)
-    except ValueError:
-        click.echo("--po-fold-len must be a number or 'false'", err=True)
-        sys.exit(1)
-    return {
-        "fold_length": fold_len,
-        "sort_output": po_sort,
-        "escape_chars": po_esc_chars,
-    }
-
-
-# Shared options for PO compile parameters
-_po_fold_len = click.option(
-    "--po-fold-len",
-    default="120",
-    help="Fold length for PO output; 0 or 'false' disables folding",
-)
-_po_sort = click.option(
-    "--po-sort", is_flag=True, default=False, help="Sort PO entries by msgid"
-)
-_po_esc_chars = click.option(
-    "--po-esc-chars/--no-po-esc-chars",
-    default=True,
-    help="Escape characters in PO output",
-)
-
-
 @click.group(invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
 @click.version_option(message="%(prog)s %(version)s")
 @click.pass_context
@@ -77,7 +43,10 @@ def app(ctx: click.Context) -> None:
     "--model",
     envvar="AITRAN_MODEL",
     default="deepseek:deepseek-v4-flash",
-    help="Model in <provider>:<model> format (e.g. openai:gpt-5.4-mini, anthropic:claude-haiku-4-5)",
+    help=(
+        "Model in <provider>:<model> format "
+        "(e.g. openai:gpt-5.4-mini, anthropic:claude-haiku-4-5)"
+    ),
 )
 @click.option(
     "-k", "--key", envvar="AITRAN_API_KEY", help="API key for the LLM provider"
@@ -130,9 +99,6 @@ def app(ctx: click.Context) -> None:
     type=click.Path(),
     help="Output file path",
 )
-@_po_fold_len
-@_po_sort
-@_po_esc_chars
 def translate(
     model: str,
     key: str | None,
@@ -148,9 +114,6 @@ def translate(
     context_file: str | None,
     context_length: int,
     output: str | None,
-    po_fold_len: str,
-    po_sort: bool,
-    po_esc_chars: bool,
 ) -> None:
     """Translate PO/XLIFF files (default command)."""
     sources = [po_file, po_dir, xliff_file, xliff_dir]
@@ -167,8 +130,6 @@ def translate(
             err=True,
         )
         sys.exit(1)
-
-    compile_opts = _get_compile_options(po_fold_len, po_sort, po_esc_chars)
 
     kwargs = {
         "model": model,
@@ -187,13 +148,11 @@ def translate(
             po_path=po_file,
             output_path=output or po_file,
             **kwargs,
-            **compile_opts,
         )
     elif po_dir:
         translate_po_dir(
             dir_path=po_dir,
             **kwargs,
-            **compile_opts,
         )
     elif xliff_file:
         translate_xliff_file(
@@ -273,9 +232,6 @@ def sync_cmd(po_path: str, pot_path: str, output: str | None) -> None:
     type=click.Path(),
     help="Output file path",
 )
-@_po_fold_len
-@_po_sort
-@_po_esc_chars
 def remove(
     po_path: str,
     fuzzy: bool,
@@ -286,12 +242,8 @@ def remove(
     fuzzy_translated: bool,
     reference_contains: str | None,
     output: str | None,
-    po_fold_len: str,
-    po_sort: bool,
-    po_esc_chars: bool,
 ) -> None:
     """Remove PO entries matching filter criteria."""
-    compile_opts = _get_compile_options(po_fold_len, po_sort, po_esc_chars)
     remove_by_options(
         po_path=po_path,
         output=output or po_path,
@@ -302,7 +254,6 @@ def remove(
         translated_not_fuzzy=translated_not_fuzzy,
         fuzzy_translated=fuzzy_translated,
         reference_contains=reference_contains,
-        compile_opts=compile_opts,
     )
     click.echo("Done.")
 

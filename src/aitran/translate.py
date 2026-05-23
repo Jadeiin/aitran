@@ -1,9 +1,12 @@
 """Core translation engine built on a Pydantic AI agent."""
 
+from __future__ import annotations
+
 import asyncio
 import html
 import os
 import sys
+from typing import TYPE_CHECKING
 
 import lxml.etree as ET
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
@@ -12,13 +15,15 @@ from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
 from translate.storage import po, xliff
 
 from aitran.agent import (
-    TranslatedUnit,
     TranslationDeps,
     build_input_xml,
     build_model,
     build_translator_agent,
 )
 from aitran.dicts import find_matching_entries
+
+if TYPE_CHECKING:
+    from aitran.agent import TranslatedUnit
 
 
 def _read_context(context_file: str | None) -> str:
@@ -76,18 +81,12 @@ class PoTranslator:
 
     @staticmethod
     def apply_batch(
-        po_file: po.pofile,
+        _po_file: po.pofile,
         units: list[po.pounit],
         results: list[TranslatedUnit],
     ) -> None:
-        """Apply a batch of agent results.
-
-        Args:
-            po_file: The PO file (needed for addnote context).
-            units: PO units in the same order as results.
-            results: Translation results matching units one-to-one.
-        """
-        for unit, result in zip(units, results):
+        """Apply a batch of agent results."""
+        for unit, result in zip(units, results, strict=True):
             unit.target = result.target
             unit.markfuzzy(result.fuzzy)
             if result.note:
@@ -149,18 +148,12 @@ class XliffTranslator:
 
     @staticmethod
     def apply_batch(
-        xlf: xliff.xlifffile,
+        _xlf: xliff.xlifffile,
         units: list[xliff.xliffunit],
         results: list[TranslatedUnit],
     ) -> None:
-        """Apply translation results to XLIFF units.
-
-        Args:
-            xlf: The XLIFF file (needed for addnote context).
-            units: XLIFF units in the same order as results.
-            results: Translation results matching units one-to-one.
-        """
-        for unit, result in zip(units, results):
+        """Apply translation results to XLIFF units."""
+        for unit, result in zip(units, results, strict=True):
             unit.target = result.target
             target_elem = unit.xmlelement.find(f"{XliffTranslator._XLIFF_NS}target")
             new_state = "needs-review-translation" if result.fuzzy else "translated"
@@ -291,7 +284,7 @@ async def _run_translation_async(
     next_start_index = 1
     err429 = False
     batch_retries = 0
-    _BATCH_MAX_RETRIES = 3
+    BATCH_MAX_RETRIES = 3
 
     with progress:
         while i < len(units):
@@ -342,15 +335,16 @@ async def _run_translation_async(
                     batch_retries += 1
                     cause = e.__cause__
                     cause_msg = f": {cause}" if cause is not None else ""
-                    if batch_retries < _BATCH_MAX_RETRIES:
+                    if batch_retries < BATCH_MAX_RETRIES:
                         console.print(
                             f"\n[yellow]Output validation failed{cause_msg}. "
-                            f"Retrying batch ({batch_retries}/{_BATCH_MAX_RETRIES})...[/]"
+                            f"Retrying batch "
+                            f"({batch_retries}/{BATCH_MAX_RETRIES})...[/]"
                         )
                         continue
                     console.print(
                         f"\n[red]Output validation failed after "
-                        f"{_BATCH_MAX_RETRIES} retries{cause_msg}. "
+                        f"{BATCH_MAX_RETRIES} retries{cause_msg}. "
                         f"Skipping {len(batch)} unit(s).[/]"
                     )
                     next_start_index += len(batch)
@@ -405,9 +399,6 @@ def translate_po(
     output_path: str,
     context_file: str | None,
     context_length: int,
-    fold_length: int = 120,
-    sort_output: bool = False,
-    escape_chars: bool = True,
     *,
     api_key: str | None = None,
     api_host: str | None = None,
@@ -461,9 +452,6 @@ def translate_po_dir(
     verbose: bool,
     context_file: str | None,
     context_length: int,
-    fold_length: int = 120,
-    sort_output: bool = False,
-    escape_chars: bool = True,
     *,
     api_key: str | None = None,
     api_host: str | None = None,
@@ -483,9 +471,6 @@ def translate_po_dir(
                 po_path,
                 context_file,
                 context_length,
-                fold_length,
-                sort_output,
-                escape_chars,
                 api_key=api_key,
                 api_host=api_host,
                 temperature=temperature,
