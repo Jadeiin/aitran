@@ -29,22 +29,22 @@ export ANTHROPIC_API_KEY=sk-...  # Anthropic
 
 ```bash
 # Translate a PO file to its header language
-aitran --po zh_Hans.po
+aitran translate --po zh_Hans.po
 
 # Translate with a specific model
-aitran --po zh_Hans.po -l zh -m anthropic:claude-haiku-4-5
+aitran translate --po zh_Hans.po -l zh -m anthropic:claude-haiku-4-5
 
 # Translate all PO files in a directory
-aitran --po-dir ./locales -l zh
+aitran translate --po-dir ./locales -l zh
 
 # Translate an XLIFF file
-aitran --xliff en_zh-CN.xliff -src en -l zh
+aitran translate --xliff en_zh-CN.xliff -src en -l zh
 
 # Verbose mode — see each translation as it completes
-aitran --po zh_Hans.po -v
+aitran translate --po zh_Hans.po -v
 
 # Custom API host (for OpenAI-compatible gateways)
-aitran --po zh_Hans.po --host https://your-gateway.example.com
+aitran translate --po zh_Hans.po --host https://your-gateway.example.com
 ```
 
 Models are specified in `<provider>:<model>` format:
@@ -65,10 +65,10 @@ Models are specified in `<provider>:<model>` format:
 
 ## CLI Reference
 
-### translate (default command)
+### translate
 
 ```
-aitran [options]
+aitran translate [options]
 ```
 
 | Option | Description |

@@ -23,18 +23,15 @@ from aitran.utils import (
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 
-@click.group(invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
+@click.group(context_settings=CONTEXT_SETTINGS)
 @click.version_option(message="%(prog)s %(version)s")
-@click.pass_context
-def app(ctx: click.Context) -> None:
+def app() -> None:
     """Aitran — Translate PO and XLIFF files using LLMs.
 
     Built on Pydantic AI. Supports OpenAI, Anthropic, and any OpenAI-compatible
     provider; specify models as `<provider>:<model>` (e.g. `openai:gpt-5.4-mini`,
     `anthropic:claude-haiku-4-5`).
     """
-    if ctx.invoked_subcommand is None:
-        ctx.invoke(translate)
 
 
 @app.command(context_settings=CONTEXT_SETTINGS)
@@ -120,7 +117,7 @@ def app(ctx: click.Context) -> None:
     show_default=True,
     help=(
         "Prompt detail level: fast (index + source only), "
-        "full (all metadata: context, location, note, flag, error)"
+        "full (all metadata: context, location, note, flag)"
     ),
 )
 @click.option(
