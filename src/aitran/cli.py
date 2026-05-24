@@ -196,6 +196,7 @@ def translate(
         translate_xliff_file(
             xliff_path=xliff_file,
             output_path=output or xliff_file,
+            order=order,
             profile=profile,
             **kwargs,
         )
@@ -203,6 +204,7 @@ def translate(
         translate_xliff_dir(
             dir_path=xliff_dir,
             jobs=jobs,
+            order=order,
             profile=profile,
             **kwargs,
         )

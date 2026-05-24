@@ -24,7 +24,6 @@ Translation guidelines are as follows:
      * `<location>` — source-code references (e.g. `src/ui/mainwindow.cpp:42`).  Use this to infer the domain and intent of the string.
      * `<note>` — human annotations: developer comments, prior translator remarks, and tool diagnostics combined.
      * `<flag>` — format / state flags (`c-format`, `python-format`, `fuzzy`, etc.).  These constrain how placeholders must be handled.
-     * `<error>` — validation errors (e.g. `length: Translation exceeds 40 chars`).  Fix these issues in your translation.
    - Example:
      ```
      <translate-batch>

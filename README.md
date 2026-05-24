@@ -88,6 +88,8 @@ aitran [options]
 | `-o, --output` | Output file path |
 | `--context` | Text file with additional translation context |
 | `--context-length` | Max accumulated source length per batch (default: 4096) |
+| `--order` | Unit ordering: `file` (default), `source`, `reference`, `context` |
+| `--profile` | Prompt detail: `full` (default, all metadata) or `fast` (index+source only) |
 
 ### sync
 

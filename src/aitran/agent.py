@@ -39,7 +39,7 @@ def build_input_xml(units: list, start_index: int, *, profile: str = "full") -> 
         start_index: 1-based starting index for this batch.
         profile: ``"fast"`` includes only ``index`` + ``source``;
             ``"full"`` (default) adds ``context``, ``location``,
-            ``note``, ``flag``, and ``error``.
+            ``note``, and ``flag``.
 
     Returns:
         XML string with a root ``<translate-batch>`` element.

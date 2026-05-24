@@ -675,6 +675,7 @@ def translate_xliff_file(
     temperature: float = 0.1,
     progress: Progress | None = None,
     profile: str = "full",
+    order: str = "file",
 ) -> None:
     """Translate a single XLIFF file."""
     translator = XliffTranslator()
@@ -705,6 +706,8 @@ def translate_xliff_file(
         print("All translation units are already translated.")
         translator.save(xlf, output_path)
         return
+
+    untranslated = _order_units(untranslated, order)
 
     _run_translation(
         store=xlf,
@@ -740,6 +743,7 @@ def translate_xliff_dir(
     api_host: str | None = None,
     temperature: float = 0.1,
     profile: str = "full",
+    order: str = "file",
 ) -> None:
     """Translate all .xliff/.xlf files in a directory."""
     xliff_paths = [
@@ -770,6 +774,7 @@ def translate_xliff_dir(
                 temperature=temperature,
                 progress=progress,
                 profile=profile,
+                order=order,
             ): xliff_path
             for xliff_path in xliff_paths
         }
