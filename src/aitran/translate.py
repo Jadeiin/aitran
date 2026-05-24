@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import html
 import os
+import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
+from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
 import lxml.etree as ET
@@ -43,6 +45,14 @@ def _is_timeout(exc: ModelHTTPError) -> bool:
     return exc.status_code in (408, 504)
 
 
+def _last_translator() -> str:
+    try:
+        package_version = version("aitran")
+    except PackageNotFoundError:
+        package_version = "unknown"
+    return f"aitran v{package_version}"
+
+
 def _build_progress(console: Console | None = None) -> Progress:
     """Create the shared progress renderer used by file translations.
 
@@ -74,14 +84,13 @@ class PoTranslator:
         return po.pofile.parsefile(path)
 
     @staticmethod
-    def get_header_language(po_file: po.pofile) -> str | None:
-        """Extract the target language from the PO header.
+    def get_target_language(po_file: po.pofile) -> str | None:
+        """Infer target language from PO metadata.
 
         Returns:
-            Target language string, or None if not set.
+            Target language string, or None if no language can be inferred.
         """
-        lang = po_file.gettargetlanguage()
-        return lang if lang else None
+        return po_file.gettargetlanguage()
 
     @staticmethod
     def get_untranslated(po_file: po.pofile) -> list[po.pounit]:
@@ -208,13 +217,15 @@ async def _translate_batch(
     deps: TranslationDeps,
     history: list,
     on_progress,
+    *,
+    profile: str = "full",
 ) -> list[TranslatedUnit]:
     """Stream one batch through the agent.
 
     Returns:
         List of TranslatedUnit aligned with the input units list.
     """
-    user_msg = build_input_xml(units, start_index)
+    user_msg = build_input_xml(units, start_index, profile=profile)
     seen: set[int] = set()
 
     async with agent.run_stream(
@@ -265,8 +276,14 @@ async def _run_translation_async(
     api_host: str | None = None,
     temperature: float = 0.1,
     progress: Progress | None = None,
+    profile: str = "full",
 ) -> None:
-    """Shared batch loop driving the translator agent."""
+    """Shared batch loop driving the translator agent.
+
+    Raises:
+        ModelHTTPError: On fatal HTTP errors (401, 403, 400) or when
+            retry limits for rate-limit / server errors are exhausted.
+    """
     context = _read_context(context_file)
     sources = [u.source for u in units]
     dict_entries = find_matching_entries(sources, target_lang)
@@ -320,16 +337,15 @@ async def _run_translation_async(
     char_count = 0
     i = 0
     next_start_index = 1
-    err429 = False
     batch_retries = 0
     BATCH_MAX_RETRIES = 3
+    rate_limit_retries = 0
+    MAX_RATE_LIMIT_RETRIES = 5
+    server_error_retries = 0
+    MAX_SERVER_ERROR_RETRIES = 3
 
     with progress if owns_progress else nullcontext():
         while i < len(units):
-            if err429:
-                await asyncio.sleep(20)
-                err429 = False
-
             unit = units[i]
             src_len = len(unit.source)
             if char_count < context_length:
@@ -353,6 +369,7 @@ async def _run_translation_async(
                         deps,
                         history,
                         on_unit_done,
+                        profile=profile,
                     )
                     translator.apply_batch(store, batch, results)
                     translator.save(store, output_path)
@@ -361,15 +378,61 @@ async def _run_translation_async(
                     batch = []
                     char_count = 0
                     batch_retries = 0
+                    rate_limit_retries = 0
+                    server_error_retries = 0
                 except ModelHTTPError as e:
+                    if e.status_code in (401, 403):
+                        console.print(
+                            f"\n[red]Authentication error {e.status_code}. "
+                            f"Check your API key.[/]"
+                        )
+                        raise
+                    if e.status_code == 400:
+                        body_detail = f": {e.body}" if e.body else ""
+                        console.print(f"\n[red]Bad request (400){body_detail}[/]")
+                        raise
                     if _is_rate_limit(e):
-                        err429 = True
+                        rate_limit_retries += 1
+                        if rate_limit_retries > MAX_RATE_LIMIT_RETRIES:
+                            console.print(
+                                f"\n[red]Rate limited "
+                                f"{MAX_RATE_LIMIT_RETRIES} times. "
+                                f"Aborting.[/]"
+                            )
+                            raise
+                        wait = (2**rate_limit_retries) + random.uniform(0, 2)
+                        console.print(
+                            f"\n[yellow]Rate limited. Waiting {wait:.1f}s "
+                            f"(attempt {rate_limit_retries}/"
+                            f"{MAX_RATE_LIMIT_RETRIES})...[/]"
+                        )
+                        await asyncio.sleep(wait)
                         continue
-                    if _is_timeout(e):
-                        console.print("\n[yellow]Timeout. Retrying...[/]")
+                    if _is_timeout(e) or e.status_code >= 500:
+                        server_error_retries += 1
+                        if server_error_retries > MAX_SERVER_ERROR_RETRIES:
+                            console.print(
+                                f"\n[red]Server error persists after "
+                                f"{MAX_SERVER_ERROR_RETRIES} retries. "
+                                f"Aborting.[/]"
+                            )
+                            raise
+                        wait = (2**server_error_retries) + random.uniform(0, 1)
+                        label = (
+                            "Timeout"
+                            if _is_timeout(e)
+                            else f"Server error {e.status_code}"
+                        )
+                        console.print(
+                            f"\n[yellow]{label}. Retrying in {wait:.1f}s "
+                            f"(attempt {server_error_retries}/"
+                            f"{MAX_SERVER_ERROR_RETRIES})...[/]"
+                        )
+                        await asyncio.sleep(wait)
                         continue
+                    # Unknown HTTP errors (3xx, other 4xx) → fail fast
                     console.print(f"\n[red]HTTP error {e.status_code}: {e}[/]")
-                    continue
+                    raise
                 except UnexpectedModelBehavior as e:
                     batch_retries += 1
                     cause = e.__cause__
@@ -413,6 +476,7 @@ def _run_translation(
     api_host: str | None = None,
     temperature: float = 0.1,
     progress: Progress | None = None,
+    profile: str = "full",
 ) -> None:
     asyncio.run(
         _run_translation_async(
@@ -431,8 +495,48 @@ def _run_translation(
             api_host=api_host,
             temperature=temperature,
             progress=progress,
+            profile=profile,
         )
     )
+
+
+def _order_units(units: list, order: str) -> list:
+    """Reorder translation units by the chosen strategy.
+
+    ``"file"`` (default) preserves the original PO file order.  ``"source"``
+    sorts alphabetically for dedup / cache-hit friendliness.  ``"reference"``
+    groups by the first source-code location so strings from the same file
+    are translated together.  ``"context"`` groups by ``msgctxt`` so strings
+    sharing a disambiguation context stay adjacent.
+
+    Returns:
+        Reordered list of units.
+    """
+    if order == "file" or not units:
+        return units
+
+    indexed = list(enumerate(units))
+    if order == "source":
+        indexed.sort(key=lambda item: item[1].source)
+    elif order == "reference":
+
+        def _reference_key(item):
+            u = item[1]
+            locs = u.getlocations() if hasattr(u, "getlocations") else []
+            return (locs[0] if locs else "", item[0])
+
+        indexed.sort(key=_reference_key)
+    elif order == "context":
+
+        def _context_key(item):
+            u = item[1]
+            getctx = getattr(u, "getcontext", None)
+            ctx = getctx() if callable(getctx) else ""
+            return (ctx, item[0])
+
+        indexed.sort(key=_context_key)
+
+    return [u for _, u in indexed]
 
 
 def translate_po(
@@ -449,17 +553,22 @@ def translate_po(
     api_host: str | None = None,
     temperature: float = 0.1,
     progress: Progress | None = None,
+    order: str = "file",
+    profile: str = "full",
 ) -> None:
     """Translate a single PO file."""
     translator = PoTranslator()
     po_file = translator.parse(po_path)
 
     if not target_lang:
-        header_lang = translator.get_header_language(po_file)
-        if header_lang:
-            target_lang = header_lang
+        inferred_lang = translator.get_target_language(po_file)
+        if inferred_lang:
+            target_lang = inferred_lang
     if not target_lang:
-        print("No target language specified via --lang or PO header", file=sys.stderr)
+        print(
+            "No target language specified via --lang or PO header",
+            file=sys.stderr,
+        )
         return
 
     untranslated = translator.get_untranslated(po_file)
@@ -468,9 +577,15 @@ def translate_po(
         translator.save(po_file, output_path)
         return
 
-    po_file.updateheader(**{"Last-Translator": "aitran v0.1.0"})
+    po_file.updateheader(
+        add=True,
+        **{
+            "Last-Translator": _last_translator(),
+            "Language": target_lang,
+        },
+    )
 
-    untranslated.sort(key=lambda u: u.source)
+    untranslated = _order_units(untranslated, order)
 
     _run_translation(
         store=po_file,
@@ -488,6 +603,7 @@ def translate_po(
         api_host=api_host,
         temperature=temperature,
         progress=progress,
+        profile=profile,
     )
 
 
@@ -504,6 +620,8 @@ def translate_po_dir(
     api_key: str | None = None,
     api_host: str | None = None,
     temperature: float = 0.1,
+    order: str = "file",
+    profile: str = "full",
 ) -> None:
     """Translate all .po files in a directory."""
     po_paths = [
@@ -533,6 +651,8 @@ def translate_po_dir(
                 api_host=api_host,
                 temperature=temperature,
                 progress=progress,
+                order=order,
+                profile=profile,
             ): po_path
             for po_path in po_paths
         }
@@ -554,6 +674,7 @@ def translate_xliff_file(
     api_host: str | None = None,
     temperature: float = 0.1,
     progress: Progress | None = None,
+    profile: str = "full",
 ) -> None:
     """Translate a single XLIFF file."""
     translator = XliffTranslator()
@@ -601,6 +722,7 @@ def translate_xliff_file(
         api_host=api_host,
         temperature=temperature,
         progress=progress,
+        profile=profile,
     )
 
 
@@ -617,6 +739,7 @@ def translate_xliff_dir(
     api_key: str | None = None,
     api_host: str | None = None,
     temperature: float = 0.1,
+    profile: str = "full",
 ) -> None:
     """Translate all .xliff/.xlf files in a directory."""
     xliff_paths = [
@@ -646,6 +769,7 @@ def translate_xliff_dir(
                 api_host=api_host,
                 temperature=temperature,
                 progress=progress,
+                profile=profile,
             ): xliff_path
             for xliff_path in xliff_paths
         }

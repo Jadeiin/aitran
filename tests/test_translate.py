@@ -3,6 +3,7 @@
 import threading
 import time
 from dataclasses import dataclass
+from importlib.metadata import version as package_version
 
 import pytest
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -22,9 +23,12 @@ from aitran.translate import (
     PoTranslator,
     XliffTranslator,
     _translate_batch,
+    translate_po,
     translate_po_dir,
     translate_xliff_dir,
 )
+
+DEFAULT_TEST_MODEL = "deepseek:deepseek-v4-flash"
 
 # ── Helpers ──────────────────────────────────────────────────────
 
@@ -33,7 +37,13 @@ from aitran.translate import (
 class FakeUnit:
     source: str
     context: str | None = None
-    comment: str | None = None
+    _note: str | None = None
+
+    def getcontext(self) -> str:
+        return self.context or ""
+
+    def getnotes(self) -> str:
+        return self._note or ""
 
 
 def _make_deps(expected_indices=(1, 2)):
@@ -59,11 +69,11 @@ def test_build_input_xml_basic():
 
 
 def test_build_input_xml_with_context():
-    units = [FakeUnit("File", context="Menu", comment="top-level")]
+    units = [FakeUnit("File", context="Menu", _note="top-level")]
     xml = build_input_xml(units, start_index=5)
     assert "<index>5</index>" in xml
     assert "<context>Menu</context>" in xml
-    assert "<comment>top-level</comment>" in xml
+    assert "<note>top-level</note>" in xml
 
 
 def test_build_input_xml_omits_none_fields():
@@ -262,6 +272,196 @@ def test_po_apply_batch_no_note_no_comment():
     assert 'msgstr "你好"' in out
 
 
+def test_translate_po_infers_target_language_from_header(monkeypatch, tmp_path):
+    source = tmp_path / "messages.po"
+    source.write_text(
+        (
+            'msgid ""\n'
+            'msgstr ""\n'
+            '"Language: zh_CN\\n"\n'
+            '"Content-Type: text/plain; charset=UTF-8\\n"\n'
+            "\n"
+            'msgid "Hello"\n'
+            'msgstr ""\n'
+        ),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_run_translation(**kwargs):
+        captured["target_lang"] = kwargs["target_lang"]
+
+    monkeypatch.setattr("aitran.translate._run_translation", fake_run_translation)
+
+    translate_po(
+        model=DEFAULT_TEST_MODEL,
+        po_path=str(source),
+        source_lang="en",
+        target_lang="",
+        verbose=False,
+        output_path=str(source),
+        context_file=None,
+        context_length=4096,
+    )
+
+    assert captured["target_lang"] == "zh_CN"
+
+
+def test_translate_po_infers_target_language_from_language_team(monkeypatch, tmp_path):
+    source = tmp_path / "messages.po"
+    source.write_text(
+        (
+            'msgid ""\n'
+            'msgstr ""\n'
+            '"Language-Team: French <traduc@traduc.org>\\n"\n'
+            '"Content-Type: text/plain; charset=UTF-8\\n"\n'
+            "\n"
+            'msgid "Hello"\n'
+            'msgstr ""\n'
+        ),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_run_translation(**kwargs):
+        captured["target_lang"] = kwargs["target_lang"]
+        kwargs["translator"].save(kwargs["store"], kwargs["output_path"])
+
+    monkeypatch.setattr("aitran.translate._run_translation", fake_run_translation)
+
+    translate_po(
+        model=DEFAULT_TEST_MODEL,
+        po_path=str(source),
+        source_lang="en",
+        target_lang="",
+        verbose=False,
+        output_path=str(source),
+        context_file=None,
+        context_length=4096,
+    )
+
+    out = source.read_text(encoding="utf-8")
+    assert captured["target_lang"] == "fr"
+    assert "Language: fr" in out
+
+
+def test_translate_po_infers_target_language_from_poedit_headers(monkeypatch, tmp_path):
+    source = tmp_path / "messages.po"
+    source.write_text(
+        (
+            'msgid ""\n'
+            'msgstr ""\n'
+            '"X-Poedit-Language: Portuguese\\n"\n'
+            '"X-Poedit-Country: BRAZIL\\n"\n'
+            '"Content-Type: text/plain; charset=UTF-8\\n"\n'
+            "\n"
+            'msgid "Hello"\n'
+            'msgstr ""\n'
+        ),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_run_translation(**kwargs):
+        captured["target_lang"] = kwargs["target_lang"]
+        kwargs["translator"].save(kwargs["store"], kwargs["output_path"])
+
+    monkeypatch.setattr("aitran.translate._run_translation", fake_run_translation)
+
+    translate_po(
+        model=DEFAULT_TEST_MODEL,
+        po_path=str(source),
+        source_lang="en",
+        target_lang="",
+        verbose=False,
+        output_path=str(source),
+        context_file=None,
+        context_length=4096,
+    )
+
+    out = source.read_text(encoding="utf-8")
+    assert captured["target_lang"] == "pt_BR"
+    assert "Language: pt_BR" in out
+    assert "X-Poedit-Language: Portuguese" in out
+    assert "X-Poedit-Country: BRAZIL" in out
+
+
+def test_translate_po_without_lang_or_header_reports_error(
+    monkeypatch, tmp_path, capsys
+):
+    source = tmp_path / "messages.po"
+    source.write_text(
+        (
+            'msgid ""\n'
+            'msgstr ""\n'
+            '"Content-Type: text/plain; charset=UTF-8\\n"\n'
+            "\n"
+            'msgid "Hello"\n'
+            'msgstr ""\n'
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_run_translation(**_kwargs):
+        pytest.fail("translation should not start without a target language")
+
+    monkeypatch.setattr("aitran.translate._run_translation", fake_run_translation)
+
+    translate_po(
+        model=DEFAULT_TEST_MODEL,
+        po_path=str(source),
+        source_lang="en",
+        target_lang="",
+        verbose=False,
+        output_path=str(source),
+        context_file=None,
+        context_length=4096,
+    )
+
+    captured = capsys.readouterr()
+    assert "No target language specified via --lang or PO header" in captured.err
+
+
+def test_translate_po_updates_last_translator_with_package_version(
+    monkeypatch, tmp_path
+):
+    source = tmp_path / "messages.po"
+    source.write_text(
+        (
+            'msgid ""\n'
+            'msgstr ""\n'
+            '"Last-Translator: Jane Doe <jane@example.com>\\n"\n'
+            '"Language: zh_CN\\n"\n'
+            '"Content-Type: text/plain; charset=UTF-8\\n"\n'
+            "\n"
+            'msgid "Hello"\n'
+            'msgstr ""\n'
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_run_translation(**kwargs):
+        kwargs["translator"].save(kwargs["store"], kwargs["output_path"])
+
+    monkeypatch.setattr("aitran.translate._run_translation", fake_run_translation)
+
+    translate_po(
+        model=DEFAULT_TEST_MODEL,
+        po_path=str(source),
+        source_lang="en",
+        target_lang="",
+        verbose=False,
+        output_path=str(source),
+        context_file=None,
+        context_length=4096,
+    )
+
+    out = source.read_text(encoding="utf-8")
+    assert f"Last-Translator: aitran v{package_version('aitran')}" in out
+    assert "Jane Doe <jane@example.com>" not in out
+    assert "aitran v0.1.0" not in out
+
+
 # ── XliffTranslator apply_batch ───────────────────────────────────
 
 
@@ -315,7 +515,7 @@ def test_build_model_anthropic_provider():
 
 
 def test_build_model_openai_provider():
-    m = build_model("openai:gpt-4o-mini", api_key="sk-test")
+    m = build_model(DEFAULT_TEST_MODEL, api_key="sk-test")
     assert isinstance(m, OpenAIChatModel)
 
 
@@ -479,7 +679,7 @@ def test_translate_po_dir_runs_files_in_parallel(monkeypatch, tmp_path):
     monkeypatch.setattr("aitran.translate.translate_po", fake_translate_po)
 
     translate_po_dir(
-        "provider:model",
+        DEFAULT_TEST_MODEL,
         str(tmp_path),
         "en",
         "zh",
@@ -520,7 +720,7 @@ def test_translate_xliff_dir_runs_files_in_parallel(monkeypatch, tmp_path):
     )
 
     translate_xliff_dir(
-        "provider:model",
+        DEFAULT_TEST_MODEL,
         str(tmp_path),
         "en",
         "zh",

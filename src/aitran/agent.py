@@ -27,24 +27,59 @@ if TYPE_CHECKING:
 from aitran.prompts import load_system_prompt, load_user_prompt
 
 
-def build_input_xml(units: list, start_index: int) -> str:
-    """Format translation units as XML using Pydantic AI's `format_as_xml`.
+def build_input_xml(units: list, start_index: int, *, profile: str = "full") -> str:
+    """Format translation units as XML for the LLM prompt.
 
-    Only non-None context / comment keys are included, so the resulting XML
-    has no `<context>null</context>` noise.
+    Only non-empty fields are included per unit.  Metadata is read through
+    :class:`~translate.storage.base.TranslationUnit` standard API methods
+    so the same code works for PO and XLIFF.
+
+    Args:
+        units: Translation units.
+        start_index: 1-based starting index for this batch.
+        profile: ``"fast"`` includes only ``index`` + ``source``;
+            ``"full"`` (default) adds ``context``, ``location``,
+            ``note``, ``flag``, and ``error``.
 
     Returns:
-        XML string with a root `<translate-batch>` element.
+        XML string with a root ``<translate-batch>`` element.
     """
     items: list[dict] = []
     for i, u in enumerate(units):
         d: dict = {"index": start_index + i, "source": u.source}
-        ctx = getattr(u, "context", None)
-        if ctx:
-            d["context"] = ctx
-        comment = getattr(u, "comment", None)
-        if comment:
-            d["comment"] = comment
+
+        if profile == "fast":
+            items.append(d)
+            continue
+
+        getctx = getattr(u, "getcontext", None)
+        if callable(getctx):
+            ctx = getctx()
+            if ctx:
+                d["context"] = ctx
+
+        locs = getattr(u, "getlocations", None)
+        if callable(locs) and locs():
+            d["location"] = ", ".join(locs())
+
+        notes = getattr(u, "getnotes", None)
+        if callable(notes):
+            note_text = notes().strip()
+            if note_text:
+                d["note"] = note_text
+
+        typecomments = getattr(u, "typecomments", None)
+        if typecomments:
+            if isinstance(typecomments, list):
+                typecomments = ", ".join(typecomments)
+            clean = (
+                f.strip().removeprefix("#,").removeprefix("#").strip(" ,")
+                for f in str(typecomments).split(",")
+            )
+            flags = [f for f in clean if f]
+            if flags:
+                d["flag"] = ", ".join(flags)
+
         items.append(d)
 
     return format_as_xml(items, root_tag="translate-batch", item_tag="translate")

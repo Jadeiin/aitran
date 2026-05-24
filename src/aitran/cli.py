@@ -101,6 +101,29 @@ def app(ctx: click.Context) -> None:
     help="Max files to translate concurrently for directory inputs",
 )
 @click.option(
+    "--order",
+    type=click.Choice(["file", "source", "reference", "context"]),
+    default="file",
+    show_default=True,
+    help=(
+        "Translation unit ordering: file (preserve original order), "
+        "source (sort alphabetically for dedup), "
+        "reference (group by source file path), "
+        "context (group by msgctxt)"
+    ),
+)
+@click.option(
+    "--profile",
+    "profile",
+    type=click.Choice(["fast", "full"]),
+    default="full",
+    show_default=True,
+    help=(
+        "Prompt detail level: fast (index + source only), "
+        "full (all metadata: context, location, note, flag, error)"
+    ),
+)
+@click.option(
     "-o",
     "--output",
     type=click.Path(),
@@ -121,6 +144,8 @@ def translate(
     context_file: str | None,
     context_length: int,
     jobs: int,
+    order: str,
+    profile: str,
     output: str | None,
 ) -> None:
     """Translate PO/XLIFF files (default command)."""
@@ -155,24 +180,30 @@ def translate(
         translate_po(
             po_path=po_file,
             output_path=output or po_file,
+            order=order,
+            profile=profile,
             **kwargs,
         )
     elif po_dir:
         translate_po_dir(
             dir_path=po_dir,
             jobs=jobs,
+            order=order,
+            profile=profile,
             **kwargs,
         )
     elif xliff_file:
         translate_xliff_file(
             xliff_path=xliff_file,
             output_path=output or xliff_file,
+            profile=profile,
             **kwargs,
         )
     elif xliff_dir:
         translate_xliff_dir(
             dir_path=xliff_dir,
             jobs=jobs,
+            profile=profile,
             **kwargs,
         )
     else:

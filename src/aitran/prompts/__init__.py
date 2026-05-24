@@ -19,7 +19,12 @@ Translation guidelines are as follows:
 
 3. **Input Format**:
    - Messages arrive as `<translate-batch>` containing one `<translate>` element per unit.
-   - Each `<translate>` has `<index>`, `<source>`, and optionally `<context>` or `<comment>` child elements.
+   - Each `<translate>` has `<index>`, `<source>`, and optionally:
+     * `<context>` — disambiguation context (PO `msgctxt`, XLIFF `context-group`).  Use this to distinguish homograph strings.
+     * `<location>` — source-code references (e.g. `src/ui/mainwindow.cpp:42`).  Use this to infer the domain and intent of the string.
+     * `<note>` — human annotations: developer comments, prior translator remarks, and tool diagnostics combined.
+     * `<flag>` — format / state flags (`c-format`, `python-format`, `fuzzy`, etc.).  These constrain how placeholders must be handled.
+     * `<error>` — validation errors (e.g. `length: Translation exceeds 40 chars`).  Fix these issues in your translation.
    - Example:
      ```
      <translate-batch>
@@ -27,6 +32,9 @@ Translation guidelines are as follows:
          <index>1</index>
          <source>File</source>
          <context>Menu</context>
+         <location>src/ui/mainwindow.cpp:42</location>
+         <note>Appears in the menu bar</note>
+         <flag>c-format</flag>
        </translate>
        <translate>
          <index>2</index>
