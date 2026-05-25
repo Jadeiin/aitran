@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "aitran",
+  "project_id": "2834b543-16ea-4705-b2da-9fcbfc57ab80"
+}
