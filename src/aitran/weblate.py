@@ -53,6 +53,7 @@ def download_translation(
         output_path: Local output file path.
 
     """
+    _ensure_translation_extension(output_path)
     api_url = normalize_weblate_url(url)
     client = Weblate(key=token, url=api_url)
     content = client.raw_request(
