@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from wlc.client import Weblate, WeblateException
+from wlc.client import Weblate
 
 _ALLOWED_EXTENSIONS = {".po", ".pot", ".xliff", ".xlf"}
 
@@ -52,22 +52,13 @@ def download_translation(
         language: Target language code.
         output_path: Local output file path.
 
-    Raises:
-        ValueError: If the URL is invalid.
-        WeblateException: If the API request fails.
     """
-    try:
-        api_url = normalize_weblate_url(url)
-    except ValueError as exc:
-        raise ValueError(str(exc)) from exc
+    api_url = normalize_weblate_url(url)
     client = Weblate(key=token, url=api_url)
-    try:
-        content = client.raw_request(
-            "GET",
-            f"translations/{project}/{component}/{language}/file/",
-        )
-    except WeblateException as exc:
-        raise WeblateException(str(exc)) from exc
+    content = client.raw_request(
+        "GET",
+        f"translations/{project}/{component}/{language}/file/",
+    )
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(content)
@@ -96,27 +87,14 @@ def upload_translation(
         replace: Whether to replace existing translations.
         fuzzy: Whether to mark imported strings as fuzzy.
 
-    Raises:
-        ValueError: If the file extension is unsupported.
-        WeblateException: If the API request fails.
     """
-    try:
-        _ensure_translation_extension(file_path)
-    except ValueError as exc:
-        raise ValueError(str(exc)) from exc
-    try:
-        api_url = normalize_weblate_url(url)
-    except ValueError as exc:
-        raise ValueError(str(exc)) from exc
-    client = Weblate(key=token, url=api_url)
+    _ensure_translation_extension(file_path)
+    client = Weblate(key=token, url=normalize_weblate_url(url))
     params = {"replace": str(replace).lower(), "fuzzy": str(fuzzy).lower()}
-    try:
-        with open(file_path, "rb") as handle:
-            client.request(
-                "POST",
-                f"translations/{project}/{component}/{language}/upload/",
-                files={"file": handle},
-                params=params,
-            )
-    except WeblateException as exc:
-        raise WeblateException(str(exc)) from exc
+    with open(file_path, "rb") as handle:
+        client.request(
+            "POST",
+            f"translations/{project}/{component}/{language}/upload/",
+            files={"file": handle},
+            params=params,
+        )

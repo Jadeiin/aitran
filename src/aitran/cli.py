@@ -605,7 +605,7 @@ def crowdin_upload(
             file_path=file_path,
             timeout_seconds=timeout_seconds,
         )
-    except (CrowdinException, RequestException, ValueError) as exc:
+    except (CrowdinException, RequestException, TimeoutError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo("Upload complete.")
 
