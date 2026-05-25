@@ -13,12 +13,33 @@ _ALLOWED_EXTENSIONS = {".po", ".pot", ".xliff", ".xlf"}
 
 
 def _ensure_translation_extension(path: str) -> None:
+    """Validate that the file path uses a supported translation extension.
+
+    Args:
+        path: File path to validate.
+
+    Raises:
+        ValueError: If the file extension is unsupported.
+    """
     ext = Path(path).suffix.lower()
     if ext not in _ALLOWED_EXTENSIONS:
         raise ValueError("Only .po, .pot, .xliff, or .xlf files are supported.")
 
 
 def _extract_data_field(payload: dict, field: str, context: str) -> Any:
+    """Extract a field from a Crowdin API payload.
+
+    Args:
+        payload: Crowdin API response dictionary.
+        field: Field name to read.
+        context: Context label for error messages.
+
+    Returns:
+        Extracted field value.
+
+    Raises:
+        ValueError: If the field is missing.
+    """
     data = payload.get("data")
     if isinstance(data, dict) and field in data:
         return data[field]
@@ -35,6 +56,19 @@ def _wait_for_build(
     timeout_seconds: int,
     poll_interval: int,
 ) -> None:
+    """Poll Crowdin build status until completion or failure.
+
+    Args:
+        client: Crowdin API client.
+        build_id: Build identifier returned by Crowdin.
+        project_id: Crowdin project ID.
+        timeout_seconds: Maximum time to wait.
+        poll_interval: Sleep interval between status checks.
+
+    Raises:
+        TimeoutError: If the build does not finish in time.
+        ValueError: If the build ends in failed or canceled state.
+    """
     deadline = time.monotonic() + timeout_seconds
     while True:
         status_payload = client.translations.check_project_build_status(
