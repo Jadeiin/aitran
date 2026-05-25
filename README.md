@@ -62,6 +62,8 @@ Models are specified in `<provider>:<model>` format:
 | `AITRAN_API_HOST` | Custom API base URL |
 | `AITRAN_MODEL` | Default model (default: `deepseek:deepseek-v4-flash`) |
 | `AITRAN_MODEL_TMP` | LLM temperature (default: `0.1`) |
+| `AITRAN_LOGFIRE` | Enable Pydantic Logfire tracing (`1`, `true`, etc.) |
+| `AITRAN_LOGFIRE_CAPTURE_HTTP` | Capture provider HTTP headers and bodies in Logfire |
 
 ## CLI Reference
 
@@ -90,6 +92,22 @@ aitran translate [options]
 | `--context-length` | Max accumulated source length per batch (default: 4096) |
 | `--order` | Unit ordering: `file` (default), `source`, `reference`, `context` |
 | `--profile` | Prompt detail: `full` (default, all metadata) or `fast` (index+source only) |
+| `--logfire` | Enable Pydantic Logfire tracing for agent/model runs |
+| `--logfire-capture-http` | Capture provider HTTP headers and bodies in Logfire |
+
+### Logfire observability
+
+`aitran translate --logfire ...` enables Pydantic Logfire instrumentation for
+Pydantic AI agent/model runs. Set up Logfire first:
+
+```bash
+uv run logfire auth
+uv run logfire projects use  # or: uv run logfire projects new
+```
+
+Use `--logfire-capture-http` only when you need raw provider requests and
+responses in the trace. It may capture prompts, completions, headers, and API
+credentials, depending on provider/client behavior.
 
 ### sync
 

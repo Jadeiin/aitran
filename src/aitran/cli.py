@@ -6,6 +6,7 @@ from importlib.resources import files
 import click
 
 from aitran.manipulate import remove_by_options
+from aitran.observability import ObservabilityError, flush_logfire, setup_logfire
 from aitran.sync import sync
 from aitran.translate import (
     translate_po,
@@ -126,6 +127,24 @@ def app() -> None:
     type=click.Path(),
     help="Output file path",
 )
+@click.option(
+    "--logfire",
+    is_flag=True,
+    envvar="AITRAN_LOGFIRE",
+    help=(
+        "Enable Pydantic Logfire tracing for agent/model runs. "
+        "Prompts and completions may be sent to Logfire."
+    ),
+)
+@click.option(
+    "--logfire-capture-http",
+    is_flag=True,
+    envvar="AITRAN_LOGFIRE_CAPTURE_HTTP",
+    help=(
+        "Also capture provider HTTP headers and bodies in Logfire. "
+        "This may include prompts, completions, and credentials."
+    ),
+)
 def translate(
     model: str,
     key: str | None,
@@ -144,8 +163,14 @@ def translate(
     order: str,
     profile: str,
     output: str | None,
+    logfire: bool,
+    logfire_capture_http: bool,
 ) -> None:
-    """Translate PO/XLIFF files (default command)."""
+    """Translate PO/XLIFF files (default command).
+
+    Raises:
+        click.ClickException: If optional observability setup fails.
+    """
     sources = [po_file, po_dir, xliff_file, xliff_dir]
     if not any(sources):
         click.echo(
@@ -161,6 +186,14 @@ def translate(
         )
         sys.exit(1)
 
+    try:
+        logfire_enabled = setup_logfire(
+            enabled=logfire,
+            capture_http=logfire_capture_http,
+        )
+    except ObservabilityError as exc:
+        raise click.ClickException(str(exc)) from exc
+
     kwargs = {
         "model": model,
         "source_lang": source,
@@ -173,41 +206,44 @@ def translate(
         "temperature": temperature,
     }
 
-    if po_file:
-        translate_po(
-            po_path=po_file,
-            output_path=output or po_file,
-            order=order,
-            profile=profile,
-            **kwargs,
-        )
-    elif po_dir:
-        translate_po_dir(
-            dir_path=po_dir,
-            jobs=jobs,
-            order=order,
-            profile=profile,
-            **kwargs,
-        )
-    elif xliff_file:
-        translate_xliff_file(
-            xliff_path=xliff_file,
-            output_path=output or xliff_file,
-            order=order,
-            profile=profile,
-            **kwargs,
-        )
-    elif xliff_dir:
-        translate_xliff_dir(
-            dir_path=xliff_dir,
-            jobs=jobs,
-            order=order,
-            profile=profile,
-            **kwargs,
-        )
-    else:
-        click.echo("No actionable target specified.", err=True)
-        sys.exit(1)
+    try:
+        if po_file:
+            translate_po(
+                po_path=po_file,
+                output_path=output or po_file,
+                order=order,
+                profile=profile,
+                **kwargs,
+            )
+        elif po_dir:
+            translate_po_dir(
+                dir_path=po_dir,
+                jobs=jobs,
+                order=order,
+                profile=profile,
+                **kwargs,
+            )
+        elif xliff_file:
+            translate_xliff_file(
+                xliff_path=xliff_file,
+                output_path=output or xliff_file,
+                order=order,
+                profile=profile,
+                **kwargs,
+            )
+        elif xliff_dir:
+            translate_xliff_dir(
+                dir_path=xliff_dir,
+                jobs=jobs,
+                order=order,
+                profile=profile,
+                **kwargs,
+            )
+        else:
+            click.echo("No actionable target specified.", err=True)
+            sys.exit(1)
+    finally:
+        flush_logfire(enabled=logfire_enabled)
 
 
 @app.command("sync", context_settings=CONTEXT_SETTINGS)

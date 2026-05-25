@@ -43,7 +43,7 @@ dependencies = [
     "translate-toolkit>=3.14",
     "click>=8.1",
     "platformdirs>=4.0",
-    "pydantic-ai-slim[anthropic,openai]>=1.0",
+    "pydantic-ai-slim[anthropic,logfire,openai]>=1.0",
     "rich>=13.0",
 ]
 
