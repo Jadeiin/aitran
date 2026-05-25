@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any
 
 import requests
 from crowdin_api import CrowdinClient
@@ -17,7 +18,7 @@ def _ensure_translation_extension(path: str) -> None:
         raise ValueError("Only .po, .pot, .xliff, or .xlf files are supported.")
 
 
-def _extract_data_field(payload: dict, field: str, context: str) -> str:
+def _extract_data_field(payload: dict, field: str, context: str) -> Any:
     data = payload.get("data")
     if isinstance(data, dict) and field in data:
         return data[field]
