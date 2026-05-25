@@ -28,6 +28,14 @@ def normalize_weblate_url(url: str) -> str:
 
 
 def _ensure_translation_extension(path: str) -> None:
+    """Validate that the file path uses a supported translation extension.
+
+    Args:
+        path: File path to validate.
+
+    Raises:
+        ValueError: If the file extension is unsupported.
+    """
     ext = Path(path).suffix.lower()
     if ext not in _ALLOWED_EXTENSIONS:
         raise ValueError("Only .po, .pot, .xliff, or .xlf files are supported.")
