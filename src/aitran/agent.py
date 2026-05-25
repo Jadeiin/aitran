@@ -239,6 +239,7 @@ def build_translator_agent(model: Model) -> Agent[TranslationDeps, TranslationBa
     """
     agent = Agent[TranslationDeps, TranslationBatch](
         model,
+        name="aitran-translator",
         deps_type=TranslationDeps,
         output_type=TranslationBatch,
         instructions=load_system_prompt() + "\n\n" + load_user_prompt(),
