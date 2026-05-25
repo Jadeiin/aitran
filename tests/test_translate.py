@@ -10,6 +10,7 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
+from translate.misc.multistring import multistring
 from translate.storage import po
 
 from aitran.agent import (
@@ -49,7 +50,7 @@ class FakeUnit:
 def _make_deps(expected_indices=(1, 2)):
     return TranslationDeps(
         source_lang="en",
-        target_lang="zh",
+        target_lang="zh_CN",
         context="",
         dict_entries=[],
         expected_indices=expected_indices,
@@ -82,6 +83,13 @@ def test_build_input_xml_omits_none_fields():
     assert "context" not in xml
     assert "comment" not in xml
     assert "null" not in xml
+
+
+def test_build_input_xml_strips_invalid_xml_characters():
+    units = [FakeUnit("Hello \x08 world")]
+    xml = build_input_xml(units, start_index=1)
+    assert "\x08" not in xml
+    assert "Hello  world" in xml
 
 
 # ── Translate batch via TestModel ─────────────────────────────────
@@ -270,6 +278,23 @@ def test_po_apply_batch_no_note_no_comment():
     )
     out = bytes(pf).decode()
     assert 'msgstr "你好"' in out
+
+
+def test_po_apply_batch_syncs_plural_count_from_target_language():
+    pf = po.pofile()
+    pf.updateheader(add=True, Language="en")
+    u = po.pounit(source=multistring(["file", "files"]))
+    pf.addunit(u)
+    PoTranslator.apply_batch(
+        pf,
+        [u],
+        [
+            TranslatedUnit(index=1, target="file", fuzzy=False),
+        ],
+    )
+    out = bytes(pf).decode()
+    assert 'msgstr[0] "file"' in out
+    assert 'msgstr[1] ""' in out
 
 
 def test_translate_po_infers_target_language_from_header(monkeypatch, tmp_path):
@@ -530,7 +555,7 @@ def test_agent_instructions_inject_glossary():
     )
     deps = TranslationDeps(
         source_lang="en",
-        target_lang="zh",
+        target_lang="zh_CN",
         context="A mobile banking app",
         dict_entries=[("login", "登录"), ("logout", "退出")],
         expected_indices=(1,),
@@ -551,7 +576,32 @@ def test_agent_instructions_inject_glossary():
     combined = "\n".join(instruction_texts)
     assert "登录" in combined
     assert "A mobile banking app" in combined
-    assert "en" in combined and "zh" in combined
+    assert "en - English" in combined
+    assert "zh_CN - Chinese (China)" in combined
+
+
+def test_agent_instructions_reject_ambiguous_language_code():
+    model = TestModel(
+        custom_output_args={
+            "translations": [{"index": 1, "target": "ok", "fuzzy": False}],
+        }
+    )
+    deps = TranslationDeps(
+        source_lang="en",
+        target_lang="zh",
+        context="",
+        dict_entries=[],
+        expected_indices=(1,),
+    )
+    agent = build_translator_agent(model)
+    with (
+        agent.override(model=model),
+        pytest.raises(ValueError, match="Unknown or ambiguous language code"),
+    ):
+        agent.run_sync(
+            build_input_xml([FakeUnit("login")], start_index=1),
+            deps=deps,
+        )
 
 
 # ── on_progress callback ───────────────────────────────────────────

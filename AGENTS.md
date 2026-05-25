@@ -17,6 +17,16 @@ uv run aitran --po file.po -l zh       # run the CLI
 
 Python 3.10+. Package manager: `uv`. Build backend: `uv_build`.
 
+## Format Scope
+
+`aitran` intentionally focuses on the two mainstream bilingual translation
+formats used by the core workflow: Gettext PO/POT and XLIFF/XLF. Do not add
+native translation paths for arbitrary source formats unless the product scope
+changes. Other file types should be translated by converting them to PO or XLIFF
+first, using translate-toolkit's bundled converters or another reliable
+round-trip pipeline, then converting the translated PO/XLIFF back to the source
+format.
+
 ## Architecture
 
 Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (Click group).
@@ -35,7 +45,7 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 1. CLI parses args → calls `translate_po` / `translate_xliff_file`
 2. Adapter parses file, filters units needing translation
 3. `_run_translation_async` batches units by accumulated char length (`--context-length`, default 4096)
-4. Each batch: `build_input_xml()` serializes units → agent streams results → `html.unescape()` reverses XML escaping → adapter applies results and saves
+4. Each batch: `build_input_xml()` serializes units → agent streams results → translate-toolkit entity decoding reverses XML escaping → adapter applies results through format APIs and saves
 5. Progress rendered via `rich.progress.Progress` with per-unit verbose output
 
 ### Model routing
@@ -54,7 +64,8 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 - **User dictionaries**: Looked up in order: `$CWD/.aitran/` → git root `.aitran/` → XDG user config dir (`platformdirs`). Named `dictionary-<lang>.json`.
 - **Commitizen**: Conventional commits with `tag_format = "v$version"`, `major_version_zero = true`.
 - **Output validation**: Agent validates index completeness via `@agent.output_validator` — missing/extra indices trigger `ModelRetry` (up to 3 retries).
-- **HTML escaping**: `format_as_xml` escapes `<>&` in source; `_translate_batch` calls `html.unescape()` on targets to reverse this.
+- **HTML/XML escaping**: `format_as_xml` escapes `<>&` in source; `_translate_batch` calls translate-toolkit `quote.htmlentitydecode()` on targets to reverse this. Prompt strings and saved targets should pass through translate-toolkit XML/text helpers where applicable.
+- **XLIFF mutation**: Do not edit XLIFF XML nodes manually when applying translations. Use `xliffunit.settarget()`, `marktranslated()`, `markreviewneeded()`, and note APIs so translate-toolkit owns node creation, XML-safe text, and state mapping.
 - **Rate limiting**: HTTP 429 triggers a 20-second sleep before retry. Timeouts (408/504) retry immediately.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->

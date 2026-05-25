@@ -19,12 +19,39 @@ from pydantic_ai.providers import infer_provider_class
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
+from translate.lang import data as lang_data
+from translate.misc import xml_helpers
 
 if TYPE_CHECKING:
     from pydantic_ai import RunContext
     from pydantic_ai.models import Model
 
 from aitran.prompts import load_system_prompt, load_user_prompt
+
+
+def _safe_prompt_text(value: object) -> str:
+    """Coerce Toolkit strings to XML-safe prompt text.
+
+    Returns:
+        Text with characters invalid in XML removed.
+    """
+    return xml_helpers.valid_chars_only(str(value))
+
+
+def _format_language_label(code: str) -> str:
+    """Format locale code with Translate Toolkit's language display name.
+
+    Returns:
+        Combined language code and display name.
+
+    Raises:
+        ValueError: If Translate Toolkit does not know the language code.
+    """
+    language = lang_data.get_language(code)
+    if not language:
+        raise ValueError(f"Unknown or ambiguous language code: {code!r}")
+    name = language[0]
+    return f"{code} - {name}"
 
 
 def build_input_xml(units: list, start_index: int, *, profile: str = "full") -> str:
@@ -46,7 +73,7 @@ def build_input_xml(units: list, start_index: int, *, profile: str = "full") -> 
     """
     items: list[dict] = []
     for i, u in enumerate(units):
-        d: dict = {"index": start_index + i, "source": u.source}
+        d: dict = {"index": start_index + i, "source": _safe_prompt_text(u.source)}
 
         if profile == "fast":
             items.append(d)
@@ -56,17 +83,17 @@ def build_input_xml(units: list, start_index: int, *, profile: str = "full") -> 
         if callable(getctx):
             ctx = getctx()
             if ctx:
-                d["context"] = ctx
+                d["context"] = _safe_prompt_text(ctx)
 
         locs = getattr(u, "getlocations", None)
         if callable(locs) and locs():
-            d["location"] = ", ".join(locs())
+            d["location"] = _safe_prompt_text(", ".join(locs()))
 
         notes = getattr(u, "getnotes", None)
         if callable(notes):
             note_text = notes().strip()
             if note_text:
-                d["note"] = note_text
+                d["note"] = _safe_prompt_text(note_text)
 
         typecomments = getattr(u, "typecomments", None)
         if typecomments:
@@ -78,7 +105,7 @@ def build_input_xml(units: list, start_index: int, *, profile: str = "full") -> 
             )
             flags = [f for f in clean if f]
             if flags:
-                d["flag"] = ", ".join(flags)
+                d["flag"] = _safe_prompt_text(", ".join(flags))
 
         items.append(d)
 
@@ -220,8 +247,10 @@ def build_translator_agent(model: Model) -> Agent[TranslationDeps, TranslationBa
 
     @agent.instructions
     def task_and_glossary(ctx: RunContext[TranslationDeps]) -> str:
+        source_label = _format_language_label(ctx.deps.source_lang)
+        target_label = _format_language_label(ctx.deps.target_lang)
         parts = [
-            f"Translate from `{ctx.deps.source_lang}` to `{ctx.deps.target_lang}` "
+            f"Translate from `{source_label}` to `{target_label}` "
             f"(XPG/POSIX locale names used in Unix-like systems and GNU Gettext)."
         ]
         if ctx.deps.context:

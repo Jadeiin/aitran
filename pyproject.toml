@@ -3,7 +3,7 @@ name = "aitran"
 version = "0.2.0"
 description = "AI-powered translation for gettext PO and XLIFF files — streaming progress, fuzzy flagging, glossary support, and translator notes for human review"
 readme = "README.md"
-license = "WTFPL"
+license = "GPL-2.0-or-later"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
@@ -25,7 +25,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: Public Domain",
     "Natural Language :: Chinese (Simplified)",
     "Natural Language :: English",
     "Operating System :: OS Independent",

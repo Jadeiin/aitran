@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import html
 import os
 import random
 import sys
@@ -12,10 +11,11 @@ from contextlib import nullcontext
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
-import lxml.etree as ET
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
+from translate.misc import quote, xml_helpers
+from translate.misc.multistring import multistring
 from translate.storage import po, xliff
 
 from aitran.agent import (
@@ -110,13 +110,19 @@ class PoTranslator:
 
     @staticmethod
     def apply_batch(
-        _po_file: po.pofile,
+        po_file: po.pofile,
         units: list[po.pounit],
         results: list[TranslatedUnit],
     ) -> None:
         """Apply a batch of agent results."""
         for unit, result in zip(units, results, strict=True):
-            unit.target = result.target
+            target = xml_helpers.valid_chars_only(result.target)
+            if unit.hasplural():
+                target = po.pounit.sync_plural_count(
+                    multistring(target),
+                    po_file.get_plural_tags(),
+                )
+            unit.target = target
             unit.markfuzzy(result.fuzzy)
             if result.note:
                 unit.addnote(result.note, origin="translator")
@@ -183,18 +189,11 @@ class XliffTranslator:
     ) -> None:
         """Apply translation results to XLIFF units."""
         for unit, result in zip(units, results, strict=True):
-            unit.target = result.target
-            target_elem = unit.xmlelement.find(f"{XliffTranslator._XLIFF_NS}target")
-            new_state = "needs-review-translation" if result.fuzzy else "translated"
-            if target_elem is not None:
-                target_elem.set("state", new_state)
-            elif result.target:
-                new_target = ET.SubElement(
-                    unit.xmlelement,
-                    f"{XliffTranslator._XLIFF_NS}target",
-                    {"state": new_state},
-                )
-                new_target.text = result.target
+            unit.settarget(xml_helpers.valid_chars_only(result.target))
+            if result.fuzzy:
+                unit.markreviewneeded()
+            else:
+                unit.marktranslated()
             if result.note:
                 unit.addnote(result.note, origin="translator")
 
@@ -254,7 +253,7 @@ async def _translate_batch(
         tu = by_index[start_index + i]
         # Reverse XML escaping applied by format_as_xml so that raw HTML
         # tags (e.g. <code>) in the source map to unescaped tags in the target.
-        tu.target = html.unescape(tu.target)
+        tu.target = quote.htmlentitydecode(tu.target)
         results.append(tu)
     return results
 
