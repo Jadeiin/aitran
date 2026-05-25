@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, ClassVar
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
-from translate.misc import quote, xml_helpers
+from translate.misc import xml_helpers
 from translate.misc.multistring import multistring
 from translate.storage import po, xliff
 
@@ -28,29 +28,6 @@ from aitran.dicts import find_matching_entries
 
 if TYPE_CHECKING:
     from aitran.agent import TranslatedUnit
-
-
-_XML_ENTITY_CODEPOINTS = {
-    "amp": ord("&"),
-    "lt": ord("<"),
-    "gt": ord(">"),
-}
-
-
-def _decode_serialized_markup(source: str, target: str) -> str:
-    """Reverse prompt XML escaping only for entities introduced by source text.
-
-    Returns:
-        Target text with prompt serialization entities decoded only when needed.
-    """
-    entity_codepoints = {
-        name: codepoint
-        for name, codepoint in _XML_ENTITY_CODEPOINTS.items()
-        if chr(codepoint) in source
-    }
-    if not entity_codepoints:
-        return target
-    return quote.entitydecode(target, entity_codepoints)
 
 
 def _read_context(context_file: str | None) -> str:
@@ -281,9 +258,6 @@ async def _translate_batch(
     results = []
     for i in range(len(units)):
         tu = by_index[start_index + i]
-        # Reverse XML escaping applied by format_as_xml only when the source
-        # had raw markup. Already-escaped source strings must remain escaped.
-        tu.target = _decode_serialized_markup(units[i].source, tu.target)
         results.append(tu)
     return results
 
