@@ -64,6 +64,11 @@ Models are specified in `<provider>:<model>` format:
 | `AITRAN_MODEL_TMP` | LLM temperature (default: `0.1`) |
 | `AITRAN_LOGFIRE` | Enable Pydantic Logfire tracing (`1`, `true`, etc.) |
 | `AITRAN_LOGFIRE_CAPTURE_HTTP` | Capture provider HTTP headers and bodies in Logfire |
+| `AITRAN_WEBLATE_URL` | Weblate base URL (e.g. `https://weblate.example.org`) |
+| `AITRAN_WEBLATE_TOKEN` | Weblate API token |
+| `AITRAN_CROWDIN_TOKEN` | Crowdin API token |
+| `AITRAN_CROWDIN_ORG` | Crowdin organization (Enterprise only) |
+| `AITRAN_CROWDIN_BASE_URL` | Crowdin API base URL override |
 
 ## CLI Reference
 
@@ -116,6 +121,24 @@ aitran sync --po <file> --pot <file>
 ```
 
 Update PO file from POT template, preserving existing translations.
+
+### weblate
+
+```
+aitran weblate download --url <url> --token <token> --project <slug> --component <slug> -l <lang> -o <file>
+aitran weblate upload --url <url> --token <token> --project <slug> --component <slug> -l <lang> --file <file>
+```
+
+Download or upload a Weblate translation file for the specified project/component.
+
+### crowdin
+
+```
+aitran crowdin download --token <token> --project-id <id> --file-id <id> -l <lang> -o <file>
+aitran crowdin upload --token <token> --project-id <id> --file-id <id> -l <lang> --file <file>
+```
+
+Download or upload a Crowdin translation file for the specified project file ID.
 
 ### remove
 
