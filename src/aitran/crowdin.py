@@ -7,8 +7,6 @@ from pathlib import Path
 
 import requests
 from crowdin_api import CrowdinClient
-from crowdin_api.exceptions import CrowdinException
-from requests import RequestException
 
 _ALLOWED_EXTENSIONS = {".po", ".pot", ".xliff", ".xlf"}
 
@@ -76,50 +74,36 @@ def download_translation(
         timeout_seconds: Timeout for API operations.
         poll_interval: Polling interval for build completion.
 
-    Raises:
-        TimeoutError: If the translation build does not finish in time.
-        ValueError: If the API responses are missing expected fields.
-        CrowdinException: If the Crowdin API call fails.
-        RequestException: If downloading the file fails.
     """
-    try:
-        client = CrowdinClient(
-            token=token,
-            organization=organization,
-            base_url=base_url,
-            project_id=project_id,
-            timeout=timeout_seconds,
-        )
-        build_payload = client.translations.build_project_file_translation(
-            file_id,
-            language,
-            projectId=project_id,
-        )
-        build_id = int(_extract_data_field(build_payload, "id", "build response"))
-        _wait_for_build(
-            client,
-            build_id=build_id,
-            project_id=project_id,
-            timeout_seconds=timeout_seconds,
-            poll_interval=poll_interval,
-        )
-        download_payload = client.translations.download_project_translations(
-            build_id, projectId=project_id
-        )
-        url = _extract_data_field(download_payload, "url", "download response")
-        response = requests.get(url, timeout=timeout_seconds)
-        response.raise_for_status()
-        out_path = Path(output_path)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(response.content)
-    except TimeoutError as exc:
-        raise TimeoutError(str(exc)) from exc
-    except ValueError as exc:
-        raise ValueError(str(exc)) from exc
-    except CrowdinException as exc:
-        raise CrowdinException(str(exc)) from exc
-    except RequestException as exc:
-        raise RequestException(str(exc)) from exc
+    client = CrowdinClient(
+        token=token,
+        organization=organization,
+        base_url=base_url,
+        project_id=project_id,
+        timeout=timeout_seconds,
+    )
+    build_payload = client.translations.build_project_file_translation(
+        file_id,
+        language,
+        projectId=project_id,
+    )
+    build_id = int(_extract_data_field(build_payload, "id", "build response"))
+    _wait_for_build(
+        client,
+        build_id=build_id,
+        project_id=project_id,
+        timeout_seconds=timeout_seconds,
+        poll_interval=poll_interval,
+    )
+    download_payload = client.translations.download_project_translations(
+        build_id, projectId=project_id
+    )
+    url = _extract_data_field(download_payload, "url", "download response")
+    response = requests.get(url, timeout=timeout_seconds)
+    response.raise_for_status()
+    out_path = Path(output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(response.content)
 
 
 def upload_translation(
@@ -145,29 +129,21 @@ def upload_translation(
         base_url: Optional API base URL override.
         timeout_seconds: Timeout for API operations.
 
-    Raises:
-        ValueError: If the file extension is unsupported or fields are missing.
-        CrowdinException: If the Crowdin API call fails.
     """
-    try:
-        _ensure_translation_extension(file_path)
-        client = CrowdinClient(
-            token=token,
-            organization=organization,
-            base_url=base_url,
-            project_id=project_id,
-            timeout=timeout_seconds,
-        )
-        with open(file_path, "rb") as handle:
-            storage_payload = client.storages.add_storage(handle)
-        storage_id = int(_extract_data_field(storage_payload, "id", "storage response"))
-        client.translations.upload_translation(
-            language,
-            storage_id,
-            file_id,
-            projectId=project_id,
-        )
-    except ValueError as exc:
-        raise ValueError(str(exc)) from exc
-    except CrowdinException as exc:
-        raise CrowdinException(str(exc)) from exc
+    _ensure_translation_extension(file_path)
+    client = CrowdinClient(
+        token=token,
+        organization=organization,
+        base_url=base_url,
+        project_id=project_id,
+        timeout=timeout_seconds,
+    )
+    with open(file_path, "rb") as handle:
+        storage_payload = client.storages.add_storage(handle)
+    storage_id = int(_extract_data_field(storage_payload, "id", "storage response"))
+    client.translations.upload_translation(
+        language,
+        storage_id,
+        file_id,
+        projectId=project_id,
+    )
