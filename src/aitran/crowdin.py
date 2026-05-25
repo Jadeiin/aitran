@@ -75,6 +75,8 @@ def download_translation(
         timeout_seconds: Timeout for API operations.
         poll_interval: Polling interval for build completion.
 
+    Raises:
+        RequestException: If downloading the build output fails.
     """
     client = CrowdinClient(
         token=token,
@@ -100,8 +102,13 @@ def download_translation(
         build_id, projectId=project_id
     )
     url = _extract_data_field(download_payload, "url", "download response")
-    response = requests.get(url, timeout=timeout_seconds)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, timeout=timeout_seconds)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise requests.RequestException(
+            "Failed to download translation file from Crowdin build URL."
+        ) from exc
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(response.content)

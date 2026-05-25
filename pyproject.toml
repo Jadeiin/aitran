@@ -61,6 +61,10 @@ Repository = "https://github.com/Jadeiin/aitran"
 requires = ["uv_build>=0.11.3,<0.12"]
 build-backend = "uv_build"
 
+[[tool.uv.index]]
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
+default = true
+
 [tool.ruff]
 preview = true
 

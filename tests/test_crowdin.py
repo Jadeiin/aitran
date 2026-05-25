@@ -148,7 +148,7 @@ def test_crowdin_download_request_error(monkeypatch, tmp_path):
     monkeypatch.setattr(crowdin, "CrowdinClient", _FakeCrowdinClient)
     monkeypatch.setattr(crowdin.requests, "get", _raise)
 
-    with pytest.raises(requests.RequestException, match="boom"):
+    with pytest.raises(requests.RequestException, match="Failed to download"):
         crowdin.download_translation(
             token="token",
             project_id=1,
