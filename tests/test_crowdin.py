@@ -15,11 +15,11 @@ class _FakeTranslations:
         self._statuses = iter(statuses or ["finished"])
 
     def build_project_file_translation(self, file_id, language, projectId=None):
-        _ = (file_id, language, projectId)
+        del file_id, language, projectId
         return {"data": {"id": 17}}
 
     def check_project_build_status(self, build_id, projectId=None):
-        _ = (build_id, projectId)
+        del build_id, projectId
         try:
             status = next(self._statuses)
         except StopIteration:
@@ -27,23 +27,23 @@ class _FakeTranslations:
         return {"data": {"status": status}}
 
     def download_project_translations(self, build_id, projectId=None):
-        _ = (build_id, projectId)
+        del build_id, projectId
         return {"data": {"url": "https://example.com/file.po"}}
 
     def upload_translation(self, language, storage_id, file_id, projectId=None):
-        _ = (language, storage_id, file_id, projectId)
+        del language, storage_id, file_id, projectId
         return {"data": {"id": 1}}
 
 
 class _FakeStorages:
-    def add_storage(self, handle):
-        _ = handle
+    def add_storage(self, _handle):
+        del _handle
         return {"data": {"id": 42}}
 
 
 class _FakeCrowdinClient:
-    def __init__(self, *args, **kwargs) -> None:
-        _ = (args, kwargs)
+    def __init__(self, *_args, **_kwargs) -> None:
+        del _args, _kwargs
         self.translations = _FakeTranslations()
         self.storages = _FakeStorages()
 
