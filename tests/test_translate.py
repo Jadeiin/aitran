@@ -24,7 +24,6 @@ from aitran.agent import (
 from aitran.translate import (
     PoTranslator,
     XliffTranslator,
-    _has_raw_markup,
     _translate_batch,
     translate_po,
     translate_po_dir,
@@ -757,20 +756,6 @@ async def test_translate_batch_rejects_extra_indices():
 # ── HTML entity unescaping ──────────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    ("source", "expected"),
-    [
-        ("click <code>btn</code>", True),
-        ('Open <a href="/docs?a=1&b=2">docs</a>', True),
-        ("line <br>", True),
-        ("show &lt;code&gt;btn&lt;/code&gt;", False),
-        ("2 < 3 and 5 > 4", False),
-    ],
-)
-def test_has_raw_markup_detects_tags_not_escaped_text(source, expected):
-    assert _has_raw_markup(source) is expected
-
-
 async def test_translate_batch_unescapes_html_entities():
     """format_as_xml escapes <>& in source; target should be unescaped back."""
     model = TestModel(
@@ -801,7 +786,7 @@ async def test_translate_batch_unescapes_html_entities():
 async def test_translate_batch_unescapes_mixed_markup_entities():
     """Toolkit entity decode reverses format_as_xml escaping for common tags."""
     encoded = (
-        "Open &lt;a href=&quot;/docs?a=1&amp;b=2&quot;&gt;docs&lt;/a&gt;, "
+        'Open &lt;a href="/docs?a=1&amp;b=2"&gt;docs&lt;/a&gt;, '
         "see &lt;strong&gt;bold&lt;/strong&gt;, "
         "&lt;code&gt;x &amp; y&lt;/code&gt; &lt;br/&gt;"
     )
@@ -836,6 +821,87 @@ async def test_translate_batch_unescapes_mixed_markup_entities():
         'Open <a href="/docs?a=1&amp;b=2">docs</a>, '
         "see <strong>bold</strong>, <code>x & y</code> <br/>"
     )
+
+
+async def test_translate_batch_preserves_non_xml_text_entities():
+    """Only XML text serialization entities should be decoded."""
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "target": "版权 &copy; &amp; Co &quot;quoted&quot;",
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [FakeUnit('Copyright © & Co "quoted"')]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,)),
+            [],
+            on_progress=None,
+        )
+    assert results[0].target == "版权 &copy; & Co &quot;quoted&quot;"
+
+
+async def test_translate_batch_unescapes_plain_ampersands():
+    """Prompt XML escaping of plain ampersands should be reversed."""
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "target": "AT&amp;T 和 Rock &amp; Roll",
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [FakeUnit("AT&T and Rock & Roll")]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,)),
+            [],
+            on_progress=None,
+        )
+    assert results[0].target == "AT&T 和 Rock & Roll"
+
+
+async def test_translate_batch_unescapes_numeric_placeholder_tags():
+    """Numeric rich-text placeholders are XML-like tags, not HTML tags."""
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "target": "&lt;0&gt;链接&lt;/0&gt;",
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [FakeUnit("<0>link</0>")]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,)),
+            [],
+            on_progress=None,
+        )
+    assert results[0].target == "<0>链接</0>"
 
 
 async def test_translate_batch_preserves_source_escaped_strings():
