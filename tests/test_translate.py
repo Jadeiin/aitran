@@ -24,6 +24,7 @@ from aitran.agent import (
 from aitran.translate import (
     PoTranslator,
     XliffTranslator,
+    _has_raw_markup,
     _translate_batch,
     translate_po,
     translate_po_dir,
@@ -756,6 +757,20 @@ async def test_translate_batch_rejects_extra_indices():
 # ── HTML entity unescaping ──────────────────────────────────────────
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("click <code>btn</code>", True),
+        ('Open <a href="/docs?a=1&b=2">docs</a>', True),
+        ("line <br>", True),
+        ("show &lt;code&gt;btn&lt;/code&gt;", False),
+        ("2 < 3 and 5 > 4", False),
+    ],
+)
+def test_has_raw_markup_detects_tags_not_escaped_text(source, expected):
+    assert _has_raw_markup(source) is expected
+
+
 async def test_translate_batch_unescapes_html_entities():
     """format_as_xml escapes <>& in source; target should be unescaped back."""
     model = TestModel(
@@ -821,6 +836,33 @@ async def test_translate_batch_unescapes_mixed_markup_entities():
         'Open <a href="/docs?a=1&amp;b=2">docs</a>, '
         "see <strong>bold</strong>, <code>x & y</code> <br/>"
     )
+
+
+async def test_translate_batch_preserves_source_escaped_strings():
+    """Entities already escaped in the source should stay escaped in target."""
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "target": "显示 &lt;code&gt;btn&lt;/code&gt;",
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [FakeUnit("show &lt;code&gt;btn&lt;/code&gt;")]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,)),
+            [],
+            on_progress=None,
+        )
+    assert results[0].target == "显示 &lt;code&gt;btn&lt;/code&gt;"
 
 
 def test_translate_po_dir_runs_files_in_parallel(monkeypatch, tmp_path):

@@ -8,6 +8,7 @@ import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
+from html.parser import HTMLParser
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, ClassVar
 
@@ -28,6 +29,47 @@ from aitran.dicts import find_matching_entries
 
 if TYPE_CHECKING:
     from aitran.agent import TranslatedUnit
+
+
+class _MarkupDetector(HTMLParser):
+    """Detect raw HTML/XML-like tags without decoding escaped text."""
+
+    has_markup: bool
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.has_markup = False
+
+    def handle_starttag(
+        self, _tag: str, _attrs: list[tuple[str, str | None]]
+    ) -> None:
+        self.has_markup = True
+
+    def handle_startendtag(
+        self, _tag: str, _attrs: list[tuple[str, str | None]]
+    ) -> None:
+        self.has_markup = True
+
+    def handle_endtag(self, _tag: str) -> None:
+        self.has_markup = True
+
+
+def _has_raw_markup(text: str) -> bool:
+    """Return whether text contains raw HTML/XML-like tags."""
+    detector = _MarkupDetector()
+    detector.feed(text)
+    return detector.has_markup
+
+
+def _decode_serialized_markup(source: str, target: str) -> str:
+    """Reverse prompt XML escaping only for units that contain raw markup.
+
+    Returns:
+        Target text with prompt serialization entities decoded only when needed.
+    """
+    if not _has_raw_markup(source):
+        return target
+    return quote.htmlentitydecode(target)
 
 
 def _read_context(context_file: str | None) -> str:
@@ -258,9 +300,9 @@ async def _translate_batch(
     results = []
     for i in range(len(units)):
         tu = by_index[start_index + i]
-        # Reverse XML escaping applied by format_as_xml so that raw HTML
-        # tags (e.g. <code>) in the source map to unescaped tags in the target.
-        tu.target = quote.htmlentitydecode(tu.target)
+        # Reverse XML escaping applied by format_as_xml only when the source
+        # had raw markup. Already-escaped source strings must remain escaped.
+        tu.target = _decode_serialized_markup(units[i].source, tu.target)
         results.append(tu)
     return results
 
