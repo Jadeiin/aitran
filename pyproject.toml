@@ -45,6 +45,8 @@ dependencies = [
     "platformdirs>=4.0",
     "pydantic-ai-slim[anthropic,logfire,openai]>=1.0",
     "rich>=13.0",
+    "wlc>=2.0.0",
+    "crowdin-api-client>=1.26.0",
 ]
 
 [project.scripts]
@@ -58,10 +60,6 @@ Repository = "https://github.com/Jadeiin/aitran"
 [build-system]
 requires = ["uv_build>=0.11.3,<0.12"]
 build-backend = "uv_build"
-
-[[tool.uv.index]]
-url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
-default = true
 
 [tool.ruff]
 preview = true

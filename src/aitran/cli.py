@@ -4,7 +4,12 @@ import sys
 from importlib.resources import files
 
 import click
+from crowdin_api.exceptions import CrowdinException
+from requests import RequestException
+from wlc.client import WeblateException
 
+from aitran.crowdin import download_translation as crowdin_download_translation
+from aitran.crowdin import upload_translation as crowdin_upload_translation
 from aitran.manipulate import remove_by_options
 from aitran.observability import ObservabilityError, flush_logfire, setup_logfire
 from aitran.sync import sync
@@ -20,6 +25,8 @@ from aitran.utils import (
     open_file_by_default,
     open_file_explorer,
 )
+from aitran.weblate import download_translation as weblate_download_translation
+from aitran.weblate import upload_translation as weblate_upload_translation
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
@@ -332,6 +339,275 @@ def remove(
         reference_contains=reference_contains,
     )
     click.echo("Done.")
+
+
+@app.group("weblate", context_settings=CONTEXT_SETTINGS)
+def weblate() -> None:
+    """Download or upload translation files using Weblate."""
+
+
+@weblate.command("download", context_settings=CONTEXT_SETTINGS)
+@click.option(
+    "--url",
+    envvar="AITRAN_WEBLATE_URL",
+    required=True,
+    help="Weblate base URL (e.g. https://weblate.example.org)",
+)
+@click.option(
+    "--token",
+    envvar="AITRAN_WEBLATE_TOKEN",
+    required=True,
+    help="Weblate API token",
+)
+@click.option("--project", required=True, help="Weblate project slug")
+@click.option("--component", required=True, help="Weblate component slug")
+@click.option("-l", "--lang", "language", required=True, help="Target language code")
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Output file path",
+)
+def weblate_download(
+    url: str,
+    token: str,
+    project: str,
+    component: str,
+    language: str,
+    output_path: str,
+) -> None:
+    """Download a translation file from Weblate.
+
+    Raises:
+        click.ClickException: If the download fails.
+    """
+    try:
+        weblate_download_translation(
+            url=url,
+            token=token,
+            project=project,
+            component=component,
+            language=language,
+            output_path=output_path,
+        )
+    except (ValueError, WeblateException) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo("Download complete.")
+
+
+@weblate.command("upload", context_settings=CONTEXT_SETTINGS)
+@click.option(
+    "--url",
+    envvar="AITRAN_WEBLATE_URL",
+    required=True,
+    help="Weblate base URL (e.g. https://weblate.example.org)",
+)
+@click.option(
+    "--token",
+    envvar="AITRAN_WEBLATE_TOKEN",
+    required=True,
+    help="Weblate API token",
+)
+@click.option("--project", required=True, help="Weblate project slug")
+@click.option("--component", required=True, help="Weblate component slug")
+@click.option("-l", "--lang", "language", required=True, help="Target language code")
+@click.option(
+    "--file",
+    "file_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Translation file to upload",
+)
+@click.option(
+    "--replace/--no-replace",
+    default=True,
+    show_default=True,
+    help="Replace existing translations on upload",
+)
+@click.option(
+    "--fuzzy/--no-fuzzy",
+    default=False,
+    show_default=True,
+    help="Mark imported strings as fuzzy",
+)
+def weblate_upload(
+    url: str,
+    token: str,
+    project: str,
+    component: str,
+    language: str,
+    file_path: str,
+    replace: bool,
+    fuzzy: bool,
+) -> None:
+    """Upload a translation file to Weblate.
+
+    Raises:
+        click.ClickException: If the upload fails.
+    """
+    try:
+        weblate_upload_translation(
+            url=url,
+            token=token,
+            project=project,
+            component=component,
+            language=language,
+            file_path=file_path,
+            replace=replace,
+            fuzzy=fuzzy,
+        )
+    except (ValueError, WeblateException) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo("Upload complete.")
+
+
+@app.group("crowdin", context_settings=CONTEXT_SETTINGS)
+def crowdin() -> None:
+    """Download or upload translation files using Crowdin."""
+
+
+@crowdin.command("download", context_settings=CONTEXT_SETTINGS)
+@click.option(
+    "--token",
+    envvar="AITRAN_CROWDIN_TOKEN",
+    required=True,
+    help="Crowdin API token",
+)
+@click.option(
+    "--organization",
+    envvar="AITRAN_CROWDIN_ORG",
+    help="Crowdin organization (Enterprise only)",
+)
+@click.option(
+    "--base-url",
+    envvar="AITRAN_CROWDIN_BASE_URL",
+    help="Crowdin API base URL override",
+)
+@click.option("--project-id", type=int, required=True, help="Crowdin project ID")
+@click.option("--file-id", type=int, required=True, help="Crowdin file ID")
+@click.option("-l", "--lang", "language", required=True, help="Target language code")
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Output file path",
+)
+@click.option(
+    "--timeout",
+    "timeout_seconds",
+    type=click.IntRange(min=1),
+    default=120,
+    show_default=True,
+    help="Timeout (seconds) for API operations",
+)
+@click.option(
+    "--poll-interval",
+    type=click.IntRange(min=1),
+    default=2,
+    show_default=True,
+    help="Polling interval (seconds) for build completion",
+)
+def crowdin_download(
+    token: str,
+    organization: str | None,
+    base_url: str | None,
+    project_id: int,
+    file_id: int,
+    language: str,
+    output_path: str,
+    timeout_seconds: int,
+    poll_interval: int,
+) -> None:
+    """Download a translation file from Crowdin.
+
+    Raises:
+        click.ClickException: If the download fails.
+    """
+    try:
+        crowdin_download_translation(
+            token=token,
+            organization=organization,
+            base_url=base_url,
+            project_id=project_id,
+            file_id=file_id,
+            language=language,
+            output_path=output_path,
+            timeout_seconds=timeout_seconds,
+            poll_interval=poll_interval,
+        )
+    except (CrowdinException, RequestException, TimeoutError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo("Download complete.")
+
+
+@crowdin.command("upload", context_settings=CONTEXT_SETTINGS)
+@click.option(
+    "--token",
+    envvar="AITRAN_CROWDIN_TOKEN",
+    required=True,
+    help="Crowdin API token",
+)
+@click.option(
+    "--organization",
+    envvar="AITRAN_CROWDIN_ORG",
+    help="Crowdin organization (Enterprise only)",
+)
+@click.option(
+    "--base-url",
+    envvar="AITRAN_CROWDIN_BASE_URL",
+    help="Crowdin API base URL override",
+)
+@click.option("--project-id", type=int, required=True, help="Crowdin project ID")
+@click.option("--file-id", type=int, required=True, help="Crowdin file ID")
+@click.option("-l", "--lang", "language", required=True, help="Target language code")
+@click.option(
+    "--file",
+    "file_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Translation file to upload",
+)
+@click.option(
+    "--timeout",
+    "timeout_seconds",
+    type=click.IntRange(min=1),
+    default=120,
+    show_default=True,
+    help="Timeout (seconds) for API operations",
+)
+def crowdin_upload(
+    token: str,
+    organization: str | None,
+    base_url: str | None,
+    project_id: int,
+    file_id: int,
+    language: str,
+    file_path: str,
+    timeout_seconds: int,
+) -> None:
+    """Upload a translation file to Crowdin.
+
+    Raises:
+        click.ClickException: If the upload fails.
+    """
+    try:
+        crowdin_upload_translation(
+            token=token,
+            organization=organization,
+            base_url=base_url,
+            project_id=project_id,
+            file_id=file_id,
+            language=language,
+            file_path=file_path,
+            timeout_seconds=timeout_seconds,
+        )
+    except (CrowdinException, RequestException, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo("Upload complete.")
 
 
 @app.command("userdict", context_settings=CONTEXT_SETTINGS)
