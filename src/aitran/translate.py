@@ -9,7 +9,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from importlib.metadata import PackageNotFoundError, version
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from rich.console import Console
@@ -143,6 +143,7 @@ class XliffTranslator:
     """Handles XLIFF file parsing, filtering, and output."""
 
     _XLIFF_NS = "{urn:oasis:names:tc:xliff:document:1.2}"
+    _DONE_STATES: ClassVar[set[str]] = {"final", "signed-off", "translated"}
 
     @staticmethod
     def parse(path: str) -> xliff.xlifffile:
@@ -175,9 +176,15 @@ class XliffTranslator:
             target = (unit.target or "").strip()
             source = (unit.source or "").strip()
 
-            state_needs = state.startswith("needs-") or state in ("new", "")
-            has_meaningful = bool(target) and target != source and not state_needs
-            if not has_meaningful:
+            if state.startswith("needs-") or state == "new":
+                result.append(unit)
+                continue
+            if not target:
+                result.append(unit)
+                continue
+            if state in cls._DONE_STATES:
+                continue
+            if target == source:
                 result.append(unit)
         return result
 

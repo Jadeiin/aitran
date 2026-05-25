@@ -528,6 +528,47 @@ def test_translate_po_updates_last_translator_with_package_version(
 # ── XliffTranslator apply_batch ───────────────────────────────────
 
 
+def test_xliff_get_untranslated_respects_done_states_with_source_target_match():
+    from translate.storage import xliff
+
+    xlf = xliff.xlifffile.parsestring(
+        rb"""<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en" target-language="zh-CN" datatype="plaintext">
+    <body>
+      <trans-unit id="final-same" approved="yes">
+        <source>Aa</source>
+        <target state="final">Aa</target>
+      </trans-unit>
+      <trans-unit id="translated-same">
+        <source>Emoji</source>
+        <target state="translated">Emoji</target>
+      </trans-unit>
+      <trans-unit id="needs-same">
+        <source>Couldn't restore session</source>
+        <target state="needs-translation">Couldn't restore session</target>
+      </trans-unit>
+      <trans-unit id="empty-target">
+        <source>Translate me</source>
+        <target/>
+      </trans-unit>
+      <trans-unit id="translate-no" translate="no">
+        <source>App name</source>
+        <target state="needs-translation">App name</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>
+"""
+    )
+
+    untranslated = XliffTranslator.get_untranslated(xlf)
+    assert [unit.xmlelement.get("id") for unit in untranslated] == [
+        "needs-same",
+        "empty-target",
+    ]
+
+
 def test_xliff_apply_batch_fuzzy_state():
     from translate.storage import xliff
 
