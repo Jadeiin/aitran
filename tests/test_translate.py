@@ -10,6 +10,7 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
+from translate.misc import xml_helpers
 from translate.misc.multistring import multistring
 from translate.storage import po
 
@@ -90,6 +91,25 @@ def test_build_input_xml_strips_invalid_xml_characters():
     xml = build_input_xml(units, start_index=1)
     assert "\x08" not in xml
     assert "Hello  world" in xml
+    xml_helpers.parse_xml(xml)
+
+
+def test_build_input_xml_preserves_escaped_markup_after_sanitizing():
+    units = [
+        FakeUnit(
+            'Click <a href="/docs?a=1&b=2">docs</a><br/><code>x & y</code>\x08',
+            context="HTML label <strong>primary</strong>",
+            _note="Keep <code>, <a>, and <br/> tags.",
+        )
+    ]
+    xml = build_input_xml(units, start_index=1)
+
+    assert "\x08" not in xml
+    assert '&lt;a href="/docs?a=1&amp;b=2"&gt;docs&lt;/a&gt;' in xml
+    assert "&lt;br/&gt;" in xml
+    assert "&lt;code&gt;x &amp; y&lt;/code&gt;" in xml
+    assert "&lt;strong&gt;primary&lt;/strong&gt;" in xml
+    xml_helpers.parse_xml(xml)
 
 
 # ── Translate batch via TestModel ─────────────────────────────────
@@ -295,6 +315,24 @@ def test_po_apply_batch_syncs_plural_count_from_target_language():
     out = bytes(pf).decode()
     assert 'msgstr[0] "file"' in out
     assert 'msgstr[1] ""' in out
+
+
+def test_po_apply_batch_uses_single_plural_form_for_chinese():
+    pf = po.pofile()
+    pf.updateheader(add=True, Language="zh_CN")
+    u = po.pounit(source=multistring(["file", "files"]))
+    pf.addunit(u)
+    PoTranslator.apply_batch(
+        pf,
+        [u],
+        [
+            TranslatedUnit(index=1, target="文件", fuzzy=False),
+        ],
+    )
+    out = bytes(pf).decode()
+    assert pf.get_plural_tags() == ["other"]
+    assert 'msgstr[0] "文件"' in out
+    assert "msgstr[1]" not in out
 
 
 def test_translate_po_infers_target_language_from_header(monkeypatch, tmp_path):
@@ -702,6 +740,46 @@ async def test_translate_batch_unescapes_html_entities():
             on_progress=None,
         )
     assert results[0].target == "点击 <code>btn</code>"
+
+
+async def test_translate_batch_unescapes_mixed_markup_entities():
+    """Toolkit entity decode reverses format_as_xml escaping for common tags."""
+    encoded = (
+        "Open &lt;a href=&quot;/docs?a=1&amp;b=2&quot;&gt;docs&lt;/a&gt;, "
+        "see &lt;strong&gt;bold&lt;/strong&gt;, "
+        "&lt;code&gt;x &amp; y&lt;/code&gt; &lt;br/&gt;"
+    )
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "target": encoded,
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [
+        FakeUnit(
+            'Open <a href="/docs?a=1&b=2">docs</a>, '
+            "see <strong>bold</strong>, <code>x & y</code> <br/>"
+        )
+    ]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,)),
+            [],
+            on_progress=None,
+        )
+    assert results[0].target == (
+        'Open <a href="/docs?a=1&amp;b=2">docs</a>, '
+        "see <strong>bold</strong>, <code>x & y</code> <br/>"
+    )
 
 
 def test_translate_po_dir_runs_files_in_parallel(monkeypatch, tmp_path):
