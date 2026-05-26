@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 import requests
 from crowdin_api.api_resources.enums import ExportProjectTranslationFormat
@@ -11,40 +9,15 @@ from crowdin_api.api_resources.enums import ExportProjectTranslationFormat
 from aitran import crowdin
 
 
-class _FakeRequester:
-    def __init__(
-        self,
-        statuses: list[str] | None = None,
-        expected_path: str | None = None,
-    ) -> None:
-        self._statuses = iter(statuses or ["finished"])
-        self.expected_path = expected_path
-        self.last_path: str | None = None
-
-    def request(self, method, **_kwargs):
-        path = _kwargs.get("path")
-        self.last_path = path
-        if self.expected_path is not None:
-            assert path == self.expected_path
-        assert method == "get"
-        try:
-            status = next(self._statuses)
-        except StopIteration:
-            status = "inProgress"
-        payload = {"data": {"status": status}}
-        if status == "finished":
-            payload["data"]["url"] = "https://example.com/file.po"
-        return payload
-
-
 class _FakeTranslations:
     def __init__(
         self,
-        statuses: list[str] | None = None,
-        expected_path: str | None = None,
+        export_payload: dict | None = None,
     ) -> None:
-        self.requester = _FakeRequester(statuses, expected_path)
         self.last_export: dict | None = None
+        self.export_payload = export_payload or {
+            "data": {"url": "https://example.com/file.xliff"}
+        }
 
     def export_project_translation(
         self,
@@ -60,7 +33,7 @@ class _FakeTranslations:
             "format": format,
             "fileIds": file_ids,
         }
-        return {"data": {"identifier": "export-17"}}
+        return self.export_payload
 
 
 class _FakeStorages:
@@ -69,11 +42,31 @@ class _FakeStorages:
         return {"data": {"id": 42}}
 
 
+class _FakeProjects:
+    def __init__(self) -> None:
+        self.projects = [{"data": {"id": 1, "name": "demo"}}]
+
+    def list_projects(self):
+        return {"data": self.projects}
+
+
+class _FakeSourceFiles:
+    def __init__(self) -> None:
+        self.files = [{"data": {"id": 2, "path": "/messages.xliff"}}]
+        self.last_project_id: int | None = None
+
+    def list_files(self, projectId=None):
+        self.last_project_id = projectId
+        return {"data": self.files}
+
+
 class _FakeCrowdinClient:
-    def __init__(self, *_args, **_kwargs) -> None:
+    def __init__(self, *_args, export_payload: dict | None = None, **_kwargs) -> None:
         del _args
         self.kwargs = _kwargs
-        self.translations = _FakeTranslations()
+        self.projects = _FakeProjects()
+        self.source_files = _FakeSourceFiles()
+        self.translations = _FakeTranslations(export_payload=export_payload)
         self.storages = _FakeStorages()
 
 
@@ -85,88 +78,6 @@ class _FakeResponse:
         return None
 
 
-def test_wait_for_export_finished():
-    client = SimpleNamespace(
-        translations=_FakeTranslations(
-            ["finished"],
-            expected_path="projects/2/translations/exports/export",
-        )
-    )
-    url = crowdin._wait_for_export(
-        client,
-        export_id="export",
-        project_id=2,
-        timeout_seconds=5,
-        poll_interval=1,
-    )
-    assert url == "https://example.com/file.po"
-
-
-def test_wait_for_export_failed():
-    client = SimpleNamespace(
-        translations=_FakeTranslations(
-            ["failed"],
-            expected_path="projects/2/translations/exports/export",
-        )
-    )
-    with pytest.raises(ValueError, match="ended with status"):
-        crowdin._wait_for_export(
-            client,
-            export_id="export",
-            project_id=2,
-            timeout_seconds=5,
-            poll_interval=1,
-        )
-
-
-def test_wait_for_export_canceled():
-    client = SimpleNamespace(
-        translations=_FakeTranslations(
-            ["canceled"],
-            expected_path="projects/2/translations/exports/export",
-        )
-    )
-    with pytest.raises(ValueError, match="ended with status"):
-        crowdin._wait_for_export(
-            client,
-            export_id="export",
-            project_id=2,
-            timeout_seconds=5,
-            poll_interval=1,
-        )
-
-
-def test_wait_for_export_timeout(monkeypatch):
-    class _FakeTime:
-        def __init__(self) -> None:
-            self.now = 0.0
-
-        def monotonic(self) -> float:
-            return self.now
-
-        def sleep(self, seconds: float) -> None:
-            self.now += seconds
-
-    fake_time = _FakeTime()
-    monkeypatch.setattr(crowdin.time, "monotonic", fake_time.monotonic)
-    monkeypatch.setattr(crowdin.time, "sleep", fake_time.sleep)
-
-    client = SimpleNamespace(
-        translations=_FakeTranslations(
-            ["inProgress"],
-            expected_path="projects/2/translations/exports/export",
-        )
-    )
-    with pytest.raises(TimeoutError, match="Timed out"):
-        crowdin._wait_for_export(
-            client,
-            export_id="export",
-            project_id=2,
-            timeout_seconds=2,
-            poll_interval=1,
-        )
-
-
 @pytest.mark.parametrize(
     ("base_url", "expected"),
     [
@@ -176,15 +87,12 @@ def test_wait_for_export_timeout(monkeypatch):
     ],
 )
 def test_normalize_crowdin_base_url(base_url, expected):
-    assert crowdin._normalize_crowdin_base_url(base_url) == expected
+    assert crowdin._crowdin_base_url_parts(base_url)[0] == expected
 
 
 def test_crowdin_download_writes_file(tmp_path, monkeypatch):
     output_path = tmp_path / "out.xliff"
     fake_client = _FakeCrowdinClient()
-    fake_client.translations.requester.expected_path = (
-        "projects/1/translations/exports/export-17"
-    )
 
     def _fake_get(*_args, **_kwargs):
         return _FakeResponse()
@@ -198,13 +106,13 @@ def test_crowdin_download_writes_file(tmp_path, monkeypatch):
     crowdin.download_translation(
         token="token",
         project_id=1,
+        project=None,
         file_id=2,
         language="zh",
         output_path=str(output_path),
         organization=None,
         base_url=None,
         timeout_seconds=5,
-        poll_interval=1,
     )
 
     assert output_path.read_bytes() == b"data"
@@ -233,13 +141,13 @@ def test_crowdin_download_normalizes_base_url(tmp_path, monkeypatch):
     crowdin.download_translation(
         token="token",
         project_id=1,
+        project=None,
         file_id=2,
         language="zh",
         output_path=str(output_path),
         organization=None,
         base_url="https://api.crowdin.com/api/v2",
         timeout_seconds=5,
-        poll_interval=1,
     )
 
     assert fake_client.kwargs["base_url"] == "api.crowdin.com/api/v2/"
@@ -251,9 +159,6 @@ def test_crowdin_download_request_error(monkeypatch, tmp_path):
         raise requests.RequestException("boom")
 
     fake_client = _FakeCrowdinClient()
-    fake_client.translations.requester.expected_path = (
-        "projects/1/translations/exports/export-17"
-    )
 
     def _factory(*_args, **_kwargs):
         return fake_client
@@ -265,11 +170,61 @@ def test_crowdin_download_request_error(monkeypatch, tmp_path):
         crowdin.download_translation(
             token="token",
             project_id=1,
+            project=None,
             file_id=2,
             language="zh",
             output_path=str(tmp_path / "out.xliff"),
             organization=None,
             base_url=None,
             timeout_seconds=5,
-            poll_interval=1,
+        )
+
+
+def test_crowdin_download_resolves_project_name(tmp_path, monkeypatch):
+    output_path = tmp_path / "out.xliff"
+    fake_client = _FakeCrowdinClient()
+
+    def _fake_get(*_args, **_kwargs):
+        return _FakeResponse()
+
+    def _factory(*_args, **_kwargs):
+        return fake_client
+
+    monkeypatch.setattr(crowdin, "CrowdinClient", _factory)
+    monkeypatch.setattr(crowdin.requests, "get", _fake_get)
+
+    crowdin.download_translation(
+        token="token",
+        project_id=None,
+        project="demo",
+        file_id=2,
+        language="zh",
+        output_path=str(output_path),
+        organization=None,
+        base_url=None,
+        timeout_seconds=5,
+    )
+
+    assert fake_client.translations.last_export["projectId"] == 1
+
+
+def test_crowdin_download_lists_files_when_file_id_missing(tmp_path, monkeypatch):
+    fake_client = _FakeCrowdinClient()
+
+    def _factory(*_args, **_kwargs):
+        return fake_client
+
+    monkeypatch.setattr(crowdin, "CrowdinClient", _factory)
+
+    with pytest.raises(ValueError, match=r"2: /messages\.xliff"):
+        crowdin.download_translation(
+            token="token",
+            project_id=None,
+            project="demo",
+            file_id=None,
+            language="zh",
+            output_path=str(tmp_path / "out.xliff"),
+            organization=None,
+            base_url=None,
+            timeout_seconds=5,
         )

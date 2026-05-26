@@ -53,7 +53,9 @@ def app() -> None:
     """
 
 
-@app.command(context_settings=CONTEXT_SETTINGS)
+@app.command(
+    "translate", context_settings=CONTEXT_SETTINGS, help="Translate PO/XLIFF files."
+)
 @click.option(
     "-m",
     "--model",
@@ -184,7 +186,7 @@ def translate(
     logfire: bool,
     logfire_capture_http: bool,
 ) -> None:
-    """Translate PO/XLIFF files (default command).
+    """Translate PO/XLIFF files.
 
     Raises:
         click.ClickException: If optional observability setup fails.
@@ -522,8 +524,9 @@ def crowdin() -> None:
     envvar="AITRAN_CROWDIN_BASE_URL",
     help="Crowdin API base URL override",
 )
-@click.option("--project-id", type=int, required=True, help="Crowdin project ID")
-@click.option("--file-id", type=int, required=True, help="Crowdin file ID")
+@click.option("--project-id", type=int, help="Crowdin project ID")
+@click.option("--project", "project_name", help="Crowdin project name")
+@click.option("--file-id", type=int, help="Crowdin file ID")
 @click.option("-l", "--lang", "language", required=True, help="Target language code")
 @click.option(
     "-o",
@@ -541,23 +544,16 @@ def crowdin() -> None:
     show_default=True,
     help="Timeout (seconds) for API operations",
 )
-@click.option(
-    "--poll-interval",
-    type=click.IntRange(min=1),
-    default=2,
-    show_default=True,
-    help="Polling interval (seconds) for build completion",
-)
 def crowdin_download(
     token: str,
     organization: str | None,
     base_url: str | None,
-    project_id: int,
-    file_id: int,
+    project_id: int | None,
+    project_name: str | None,
+    file_id: int | None,
     language: str,
     output_path: str,
     timeout_seconds: int,
-    poll_interval: int,
 ) -> None:
     """Download a translation file from Crowdin.
 
@@ -570,11 +566,11 @@ def crowdin_download(
             organization=organization,
             base_url=base_url,
             project_id=project_id,
+            project=project_name,
             file_id=file_id,
             language=language,
             output_path=output_path,
             timeout_seconds=timeout_seconds,
-            poll_interval=poll_interval,
         )
     except (CrowdinException, RequestException, TimeoutError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -602,8 +598,9 @@ def crowdin_download(
     envvar="AITRAN_CROWDIN_BASE_URL",
     help="Crowdin API base URL override",
 )
-@click.option("--project-id", type=int, required=True, help="Crowdin project ID")
-@click.option("--file-id", type=int, required=True, help="Crowdin file ID")
+@click.option("--project-id", type=int, help="Crowdin project ID")
+@click.option("--project", "project_name", help="Crowdin project name")
+@click.option("--file-id", type=int, help="Crowdin file ID")
 @click.option("-l", "--lang", "language", required=True, help="Target language code")
 @click.option(
     "--file",
@@ -624,8 +621,9 @@ def crowdin_upload(
     token: str,
     organization: str | None,
     base_url: str | None,
-    project_id: int,
-    file_id: int,
+    project_id: int | None,
+    project_name: str | None,
+    file_id: int | None,
     language: str,
     file_path: str,
     timeout_seconds: int,
@@ -641,6 +639,7 @@ def crowdin_upload(
             organization=organization,
             base_url=base_url,
             project_id=project_id,
+            project=project_name,
             file_id=file_id,
             language=language,
             file_path=file_path,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -11,45 +10,33 @@ import requests
 from crowdin_api import CrowdinClient
 from crowdin_api.api_resources.enums import ExportProjectTranslationFormat
 
-_OUTPUT_FORMATS = {".xliff": ExportProjectTranslationFormat.XLIFF}
-_ALLOWED_EXTENSIONS = set(_OUTPUT_FORMATS)
 
-
-def _ensure_translation_extension(path: str) -> None:
-    """Validate that the file path uses a supported translation extension.
+def _translation_format(path: str) -> ExportProjectTranslationFormat:
+    """Infer Crowdin translation format from a local path.
 
     Args:
-        path: File path to validate.
-
-    Raises:
-        ValueError: If the file extension is unsupported.
-    """
-    ext = Path(path).suffix.lower()
-    if ext not in _ALLOWED_EXTENSIONS:
-        raise ValueError("Only .xliff files are supported.")
-
-
-def _format_from_output_path(path: str) -> ExportProjectTranslationFormat:
-    """Infer Crowdin export format from an output path.
-
-    Args:
-        path: Output file path.
+        path: Local file path.
 
     Returns:
-        Crowdin export format matching the output suffix.
+        Crowdin export format.
+
+    Raises:
+        ValueError: If the path extension is unsupported.
     """
-    _ensure_translation_extension(path)
-    return _OUTPUT_FORMATS[Path(path).suffix.lower()]
+    ext = Path(path).suffix.lower()
+    if ext != ".xliff":
+        raise ValueError("Only .xliff files are supported.")
+    return ExportProjectTranslationFormat.XLIFF
 
 
-def _normalize_crowdin_base_url(url: str) -> str:
-    """Normalize Crowdin base URL to the SDK's host/path form.
+def _crowdin_base_url_parts(url: str) -> tuple[str, str | None]:
+    """Normalize Crowdin base URL and extract its optional scheme.
 
     Args:
         url: Crowdin base URL override.
 
     Returns:
-        Base URL without scheme and with a trailing slash.
+        Base URL without scheme, plus the optional URL scheme.
 
     Raises:
         ValueError: If the URL is empty or uses an unsupported scheme.
@@ -64,29 +51,120 @@ def _normalize_crowdin_base_url(url: str) -> str:
     base_url = base_url.strip("/")
     if not base_url:
         raise ValueError("Crowdin base URL is required.")
-    return f"{base_url}/"
+    return f"{base_url}/", parsed.scheme or None
 
 
-def _crowdin_http_protocol(url: str | None) -> str | None:
-    """Extract the SDK http_protocol value from a URL override.
+def _items(payload: Any) -> list[dict]:
+    """Extract Crowdin SDK list payload items as data dictionaries.
 
     Args:
-        url: Optional Crowdin base URL override.
+        payload: Crowdin SDK list response.
 
     Returns:
-        URL scheme for the SDK, or None when no scheme was provided.
+        Plain item dictionaries.
+    """
+    items = payload.get("data", []) if isinstance(payload, dict) else payload
+    if not isinstance(items, list):
+        return []
+    return [
+        item["data"] if isinstance(item.get("data"), dict) else item
+        for item in items
+        if isinstance(item, dict)
+    ]
+
+
+def _choice_lines(items: list[dict], *, name_field: str, limit: int) -> str:
+    """Format Crowdin objects for a selection error.
+
+    Args:
+        items: Crowdin object dictionaries.
+        name_field: Preferred display field.
+        limit: Maximum number of choices to show.
+
+    Returns:
+        Newline-separated choice labels.
+    """
+    return "\n".join(
+        f"  {item.get('id', '?')}: "
+        f"{item.get(name_field) or item.get('name') or '<unnamed>'}"
+        for item in items[:limit]
+    )
+
+
+def _resolve_project_id(
+    client: CrowdinClient,
+    *,
+    project_id: int | None,
+    project: str | None,
+) -> int:
+    """Resolve a Crowdin project ID from an explicit ID or project name.
+
+    Args:
+        client: Crowdin API client.
+        project_id: Explicit Crowdin project ID.
+        project: Crowdin project name.
+
+    Returns:
+        Crowdin project ID.
 
     Raises:
-        ValueError: If the URL uses an unsupported scheme.
+        ValueError: If the project cannot be resolved unambiguously.
     """
-    if not url:
-        return None
-    scheme = urlsplit(url.strip()).scheme
-    if not scheme:
-        return None
-    if scheme not in {"http", "https"}:
-        raise ValueError("Crowdin base URL must use http or https.")
-    return scheme
+    if project_id is not None:
+        return project_id
+    if not project:
+        raise ValueError("Either Crowdin project ID or project name is required.")
+
+    projects = _items(client.projects.list_projects())
+    lowered = project.casefold()
+    matches = [
+        item for item in projects if str(item.get("name", "")).casefold() == lowered
+    ]
+    if len(matches) == 1:
+        return int(matches[0]["id"])
+
+    if matches:
+        choices = _choice_lines(matches, name_field="name", limit=20)
+        raise ValueError(
+            f"Crowdin project name '{project}' is ambiguous. "
+            f"Use --project-id with one of:\n{choices}"
+        )
+
+    choices = _choice_lines(projects, name_field="name", limit=20)
+    raise ValueError(
+        f"Crowdin project '{project}' was not found."
+        + (f" Available projects:\n{choices}" if choices else "")
+    )
+
+
+def _resolve_file_id(
+    client: CrowdinClient,
+    *,
+    project_id: int,
+    file_id: int | None,
+) -> int:
+    """Resolve or request a Crowdin source file ID.
+
+    Args:
+        client: Crowdin API client.
+        project_id: Crowdin project ID.
+        file_id: Explicit Crowdin file ID.
+
+    Returns:
+        Crowdin file ID.
+
+    Raises:
+        ValueError: If no file ID was provided.
+    """
+    if file_id is not None:
+        return file_id
+
+    files = _items(client.source_files.list_files(projectId=project_id))
+    choices = _choice_lines(files, name_field="path", limit=50)
+    raise ValueError(
+        "Crowdin file ID is required. Use --file-id with one of:"
+        + (f"\n{choices}" if choices else " no files found in this project.")
+    )
 
 
 def _extract_data_field(payload: dict, field: str, context: str) -> Any:
@@ -94,11 +172,11 @@ def _extract_data_field(payload: dict, field: str, context: str) -> Any:
 
     Args:
         payload: Crowdin API response dictionary.
-        field: Field name to read.
-        context: Context label for error messages.
+        field: Field name to extract.
+        context: Label for error messages.
 
     Returns:
-        Extracted field value.
+        Field value.
 
     Raises:
         ValueError: If the field is missing.
@@ -111,120 +189,69 @@ def _extract_data_field(payload: dict, field: str, context: str) -> Any:
     raise ValueError(f"Missing {context} field '{field}'.")
 
 
-def _get_export_status(
-    client: CrowdinClient,
-    *,
-    export_id: str,
-    project_id: int,
-) -> dict:
-    """Fetch Crowdin export status payload.
-
-    Returns:
-        Crowdin API response payload for the export status.
-    """
-    return client.translations.requester.request(
-        method="get",
-        path=f"projects/{project_id}/translations/exports/{export_id}",
-    )
-
-
-def _wait_for_export(
-    client: CrowdinClient,
-    *,
-    export_id: str,
-    project_id: int,
-    timeout_seconds: int,
-    poll_interval: int,
-) -> str:
-    """Poll Crowdin export status until completion or failure.
+def _client_url_options(base_url: str | None) -> dict[str, str | None]:
+    """Build optional CrowdinClient URL kwargs.
 
     Args:
-        client: Crowdin API client.
-        export_id: Export identifier returned by Crowdin.
-        project_id: Crowdin project ID.
-        timeout_seconds: Maximum time to wait.
-        poll_interval: Sleep interval between status checks.
+        base_url: Optional API base URL override.
 
     Returns:
-        Download URL for the export.
-
-    Raises:
-        TimeoutError: If the export does not finish in time.
-        ValueError: If the export ends in failed or canceled state.
+        CrowdinClient URL keyword arguments.
     """
-    deadline = time.monotonic() + timeout_seconds
-    while True:
-        status_payload = _get_export_status(
-            client,
-            export_id=export_id,
-            project_id=project_id,
-        )
-        status = _extract_data_field(status_payload, "status", "export status")
-        if status == "finished":
-            return _extract_data_field(status_payload, "url", "export download")
-        if status in {"failed", "canceled"}:
-            raise ValueError(
-                f"Crowdin export {export_id} ended with status '{status}'."
-            )
-        if time.monotonic() >= deadline:
-            raise TimeoutError("Timed out waiting for Crowdin export to finish.")
-        time.sleep(poll_interval)
+    if not base_url:
+        return {"base_url": None, "http_protocol": None}
+    normalized, scheme = _crowdin_base_url_parts(base_url)
+    return {"base_url": normalized, "http_protocol": scheme}
 
 
 def download_translation(
     *,
     token: str,
-    project_id: int,
-    file_id: int,
+    project_id: int | None,
+    project: str | None,
+    file_id: int | None,
     language: str,
     output_path: str,
     organization: str | None,
     base_url: str | None,
     timeout_seconds: int,
-    poll_interval: int,
 ) -> None:
     """Download a translation file from Crowdin.
 
     Args:
         token: Crowdin API token.
-        project_id: Crowdin project ID.
-        file_id: Crowdin file ID.
+        project_id: Optional Crowdin project ID.
+        project: Optional Crowdin project name.
+        file_id: Optional Crowdin file ID.
         language: Target language code.
         output_path: Local output file path.
         organization: Crowdin organization (Enterprise only).
         base_url: Optional API base URL override.
         timeout_seconds: Timeout for API operations.
-        poll_interval: Polling interval for build completion.
 
     Raises:
         RequestException: If downloading the build output fails.
     """
-    _ensure_translation_extension(output_path)
     client = CrowdinClient(
         token=token,
         organization=organization,
-        base_url=_normalize_crowdin_base_url(base_url) if base_url else None,
         project_id=project_id,
         timeout=timeout_seconds,
-        http_protocol=_crowdin_http_protocol(base_url),
+        **_client_url_options(base_url),
     )
-    export_format = _format_from_output_path(output_path)
+    project_id = _resolve_project_id(
+        client,
+        project_id=project_id,
+        project=project,
+    )
+    file_id = _resolve_file_id(client, project_id=project_id, file_id=file_id)
     export_payload = client.translations.export_project_translation(
         language,
         projectId=project_id,
-        format=export_format,
+        format=_translation_format(output_path),
         fileIds=[file_id],
     )
-    export_id = str(
-        _extract_data_field(export_payload, "identifier", "export response")
-    )
-    url = _wait_for_export(
-        client,
-        export_id=export_id,
-        project_id=project_id,
-        timeout_seconds=timeout_seconds,
-        poll_interval=poll_interval,
-    )
+    url = str(_extract_data_field(export_payload, "url", "export response"))
     try:
         response = requests.get(url, timeout=timeout_seconds)
         response.raise_for_status()
@@ -240,8 +267,9 @@ def download_translation(
 def upload_translation(
     *,
     token: str,
-    project_id: int,
-    file_id: int,
+    project_id: int | None,
+    project: str | None,
+    file_id: int | None,
     language: str,
     file_path: str,
     organization: str | None,
@@ -252,8 +280,9 @@ def upload_translation(
 
     Args:
         token: Crowdin API token.
-        project_id: Crowdin project ID.
-        file_id: Crowdin file ID.
+        project_id: Optional Crowdin project ID.
+        project: Optional Crowdin project name.
+        file_id: Optional Crowdin file ID.
         language: Target language code.
         file_path: Local translation file path.
         organization: Crowdin organization (Enterprise only).
@@ -261,15 +290,20 @@ def upload_translation(
         timeout_seconds: Timeout for API operations.
 
     """
-    _ensure_translation_extension(file_path)
+    _translation_format(file_path)
     client = CrowdinClient(
         token=token,
         organization=organization,
-        base_url=_normalize_crowdin_base_url(base_url) if base_url else None,
         project_id=project_id,
         timeout=timeout_seconds,
-        http_protocol=_crowdin_http_protocol(base_url),
+        **_client_url_options(base_url),
     )
+    project_id = _resolve_project_id(
+        client,
+        project_id=project_id,
+        project=project,
+    )
+    file_id = _resolve_file_id(client, project_id=project_id, file_id=file_id)
     with open(file_path, "rb") as handle:
         storage_payload = client.storages.add_storage(handle)
     storage_id = int(_extract_data_field(storage_payload, "id", "storage response"))
