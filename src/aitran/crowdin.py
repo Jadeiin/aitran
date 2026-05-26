@@ -191,19 +191,22 @@ def _extract_data_field(payload: dict, field: str, context: str) -> Any:
     raise ValueError(f"Missing {context} field '{field}'.")
 
 
-def _client_url_options(base_url: str | None) -> dict[str, str | None]:
+def _client_url_options(base_url: str | None) -> dict[str, str]:
     """Build optional CrowdinClient URL kwargs.
 
     Args:
         base_url: Optional API base URL override.
 
     Returns:
-        CrowdinClient URL keyword arguments.
+        CrowdinClient URL keyword arguments. Empty when no override is set.
     """
     if not base_url:
-        return {"base_url": None, "http_protocol": None}
+        return {}
     normalized, scheme = _crowdin_base_url_parts(base_url)
-    return {"base_url": normalized, "http_protocol": scheme}
+    options = {"base_url": normalized}
+    if scheme:
+        options["http_protocol"] = scheme
+    return options
 
 
 def list_projects(

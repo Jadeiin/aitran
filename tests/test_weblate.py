@@ -189,6 +189,32 @@ def test_weblate_download_format(tmp_path, monkeypatch):
     )
 
 
+def test_weblate_untranslated_download_uses_compatibility_layer(monkeypatch):
+    fake = _FakeTranslation()
+    fake.weblate = _FakeWeblate(key="token", url="https://example.com/api/")
+    captured = {}
+
+    def _file_url(translation):
+        captured["translation"] = translation
+        return "https://example.com/file/"
+
+    monkeypatch.setattr(weblate, "_translation_file_url", _file_url)
+
+    assert (
+        weblate._download_translation_content(
+            fake,
+            "po",
+            untranslated_only=True,
+        )
+        == b"payload"
+    )
+    assert captured["translation"] is fake
+    assert fake.weblate.last_raw_request == (
+        "get",
+        "https://example.com/file/?format=po&q=is%3Auntranslated",
+    )
+
+
 def test_weblate_download_rejects_invalid_explicit_output_extension(
     tmp_path, monkeypatch
 ):

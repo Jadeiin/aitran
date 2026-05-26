@@ -236,6 +236,10 @@ def test_crowdin_download_normalizes_base_url(tmp_path, monkeypatch):
     assert fake_client.kwargs["http_protocol"] == "https"
 
 
+def test_crowdin_client_url_options_omits_empty_override():
+    assert crowdin._client_url_options(None) == {}
+
+
 def test_crowdin_lists_projects_files_languages_and_progress(monkeypatch):
     fake_client = _FakeCrowdinClient()
 

@@ -158,7 +158,32 @@ def _download_translation_content(
         return translation.download(download_format)
 
     params = {"format": download_format, "q": "is:untranslated"}
-    url = f"{translation._get_stored('file_url')}?{urlencode(params)}"
+    url = f"{_translation_file_url(translation)}?{urlencode(params)}"
+    return _raw_translation_download(translation, url)
+
+
+def _translation_file_url(translation: Translation) -> str:
+    """Return the translation file endpoint used by wlc's public download method.
+
+    Args:
+        translation: Weblate translation object.
+
+    Returns:
+        File download endpoint URL.
+    """
+    return translation._get_stored("file_url")
+
+
+def _raw_translation_download(translation: Translation, url: str) -> bytes:
+    """Download a translation URL with query parameters unsupported by wlc.
+
+    Args:
+        translation: Weblate translation object.
+        url: File download endpoint URL including query parameters.
+
+    Returns:
+        Downloaded file bytes.
+    """
     return translation.weblate.raw_request("get", url)
 
 
