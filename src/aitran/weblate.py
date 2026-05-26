@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlencode
 
 from wlc.client import Translation, Weblate
@@ -55,6 +56,41 @@ def _normalize_weblate_api_url(url: str) -> str:
     if not api_url.endswith("/api"):
         api_url = f"{api_url}/api"
     return f"{api_url}/"
+
+
+def list_objects(*, url: str, token: str, object_path: str | None) -> list[Any]:
+    """List Weblate objects like `wlc ls`.
+
+    Args:
+        url: Weblate base URL.
+        token: Weblate API token.
+        object_path: Optional project/component/translation path.
+
+    Returns:
+        Weblate objects returned by the SDK.
+    """
+    client = Weblate(key=token, url=_normalize_weblate_api_url(url))
+    if object_path:
+        return list(client.get_object(object_path).list())
+    return list(client.list_projects())
+
+
+def get_stats(*, url: str, token: str, object_path: str) -> Any:
+    """Return Weblate statistics like `wlc stats`.
+
+    Args:
+        url: Weblate base URL.
+        token: Weblate API token.
+        object_path: Project, component, or translation path.
+
+    Returns:
+        Statistics returned by the SDK.
+    """
+    return (
+        Weblate(key=token, url=_normalize_weblate_api_url(url))
+        .get_object(object_path)
+        .statistics()
+    )
 
 
 def _ensure_translation_extension(path: str) -> None:

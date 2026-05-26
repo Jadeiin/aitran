@@ -9,6 +9,10 @@ from requests import RequestException
 from wlc.client import WeblateException
 
 from aitran.crowdin import download_translation as crowdin_download_translation
+from aitran.crowdin import get_progress as crowdin_get_progress
+from aitran.crowdin import list_files as crowdin_list_files
+from aitran.crowdin import list_languages as crowdin_list_languages
+from aitran.crowdin import list_projects as crowdin_list_projects
 from aitran.crowdin import upload_translation as crowdin_upload_translation
 from aitran.manipulate import remove_by_options
 from aitran.observability import ObservabilityError, flush_logfire, setup_logfire
@@ -26,6 +30,8 @@ from aitran.utils import (
     open_file_explorer,
 )
 from aitran.weblate import download_translation as weblate_download_translation
+from aitran.weblate import get_stats as weblate_get_stats
+from aitran.weblate import list_objects as weblate_list_objects
 from aitran.weblate import upload_translation as weblate_upload_translation
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
@@ -40,6 +46,90 @@ WEBLATE_UPLOAD_METHODS = [
 ]
 WEBLATE_FUZZY_CHOICES = ["process", "approve"]
 WEBLATE_DOWNLOAD_FORMATS = ["po", "xliff11", "xliff"]
+
+
+def _weblate_auth_options(command):
+    """Apply common Weblate connection options.
+
+    Args:
+        command: Click command function.
+
+    Returns:
+        Decorated command function.
+    """
+    command = click.option(
+        "--token",
+        envvar="AITRAN_WEBLATE_TOKEN",
+        required=True,
+        help="Weblate API token",
+    )(command)
+    return click.option(
+        "--url",
+        envvar="AITRAN_WEBLATE_URL",
+        required=True,
+        help="Weblate base URL (e.g. https://weblate.example.org)",
+    )(command)
+
+
+def _crowdin_auth_options(command):
+    """Apply common Crowdin connection options.
+
+    Args:
+        command: Click command function.
+
+    Returns:
+        Decorated command function.
+    """
+    command = click.option(
+        "--base-url",
+        envvar="AITRAN_CROWDIN_BASE_URL",
+        help="Crowdin API base URL override",
+    )(command)
+    command = click.option(
+        "--organization",
+        envvar="AITRAN_CROWDIN_ORG",
+        help="Crowdin organization (Enterprise only)",
+    )(command)
+    return click.option(
+        "--token",
+        envvar="AITRAN_CROWDIN_TOKEN",
+        required=True,
+        help="Crowdin API token",
+    )(command)
+
+
+def _crowdin_project_options(command):
+    """Apply common Crowdin project selection options.
+
+    Args:
+        command: Click command function.
+
+    Returns:
+        Decorated command function.
+    """
+    command = click.option("--project", "project_name", help="Crowdin project name")(
+        command
+    )
+    return click.option("--project-id", type=int, help="Crowdin project ID")(command)
+
+
+def _timeout_option(command):
+    """Apply the common API timeout option.
+
+    Args:
+        command: Click command function.
+
+    Returns:
+        Decorated command function.
+    """
+    return click.option(
+        "--timeout",
+        "timeout_seconds",
+        type=click.IntRange(min=1),
+        default=120,
+        show_default=True,
+        help="Timeout (seconds) for API operations",
+    )(command)
 
 
 @click.group(context_settings=CONTEXT_SETTINGS)
@@ -359,23 +449,46 @@ def weblate() -> None:
     """Download or upload translation files using Weblate."""
 
 
+@weblate.command("ls", context_settings=CONTEXT_SETTINGS, help="List Weblate objects.")
+@_weblate_auth_options
+@click.argument("object_path", required=False)
+def weblate_ls(url: str, token: str, object_path: str | None) -> None:
+    """List Weblate projects or child objects.
+
+    Raises:
+        click.ClickException: If listing fails.
+    """
+    try:
+        click.echo(weblate_list_objects(url=url, token=token, object_path=object_path))
+    except (TypeError, ValueError, WeblateException, RequestException) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@weblate.command(
+    "stats",
+    context_settings=CONTEXT_SETTINGS,
+    help="Show Weblate object statistics.",
+)
+@_weblate_auth_options
+@click.argument("object_path")
+def weblate_stats(url: str, token: str, object_path: str) -> None:
+    """Show Weblate statistics for a project, component, or translation.
+
+    Raises:
+        click.ClickException: If loading stats fails.
+    """
+    try:
+        click.echo(weblate_get_stats(url=url, token=token, object_path=object_path))
+    except (TypeError, ValueError, WeblateException, RequestException) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @weblate.command(
     "download",
     context_settings=CONTEXT_SETTINGS,
     help="Download a translation file from Weblate.",
 )
-@click.option(
-    "--url",
-    envvar="AITRAN_WEBLATE_URL",
-    required=True,
-    help="Weblate base URL (e.g. https://weblate.example.org)",
-)
-@click.option(
-    "--token",
-    envvar="AITRAN_WEBLATE_TOKEN",
-    required=True,
-    help="Weblate API token",
-)
+@_weblate_auth_options
 @click.option(
     "--object",
     "object_path",
@@ -434,18 +547,7 @@ def weblate_download(
     context_settings=CONTEXT_SETTINGS,
     help="Upload a translation file to Weblate.",
 )
-@click.option(
-    "--url",
-    envvar="AITRAN_WEBLATE_URL",
-    required=True,
-    help="Weblate base URL (e.g. https://weblate.example.org)",
-)
-@click.option(
-    "--token",
-    envvar="AITRAN_WEBLATE_TOKEN",
-    required=True,
-    help="Weblate API token",
-)
+@_weblate_auth_options
 @click.option(
     "--object",
     "object_path",
@@ -504,28 +606,153 @@ def crowdin() -> None:
 
 
 @crowdin.command(
+    "projects",
+    context_settings=CONTEXT_SETTINGS,
+    help="List Crowdin projects.",
+)
+@_crowdin_auth_options
+@_timeout_option
+def crowdin_projects(
+    token: str,
+    organization: str | None,
+    base_url: str | None,
+    timeout_seconds: int,
+) -> None:
+    """List Crowdin projects.
+
+    Raises:
+        click.ClickException: If listing fails.
+    """
+    try:
+        click.echo(
+            crowdin_list_projects(
+                token=token,
+                organization=organization,
+                base_url=base_url,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    except (CrowdinException, RequestException, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@crowdin.command("files", context_settings=CONTEXT_SETTINGS, help="List Crowdin files.")
+@_crowdin_auth_options
+@_crowdin_project_options
+@_timeout_option
+def crowdin_files(
+    token: str,
+    organization: str | None,
+    base_url: str | None,
+    project_id: int | None,
+    project_name: str | None,
+    timeout_seconds: int,
+) -> None:
+    """List Crowdin source files.
+
+    Raises:
+        click.ClickException: If listing fails.
+    """
+    try:
+        click.echo(
+            crowdin_list_files(
+                token=token,
+                organization=organization,
+                base_url=base_url,
+                project_id=project_id,
+                project=project_name,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    except (CrowdinException, RequestException, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@crowdin.command(
+    "languages",
+    context_settings=CONTEXT_SETTINGS,
+    help="List Crowdin supported languages.",
+)
+@_crowdin_auth_options
+@_crowdin_project_options
+@_timeout_option
+def crowdin_languages(
+    token: str,
+    organization: str | None,
+    base_url: str | None,
+    project_id: int | None,
+    project_name: str | None,
+    timeout_seconds: int,
+) -> None:
+    """List Crowdin supported languages.
+
+    Raises:
+        click.ClickException: If listing fails.
+    """
+    try:
+        click.echo(
+            crowdin_list_languages(
+                token=token,
+                organization=organization,
+                base_url=base_url,
+                project_id=project_id,
+                project=project_name,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    except (CrowdinException, RequestException, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@crowdin.command(
+    "progress",
+    context_settings=CONTEXT_SETTINGS,
+    help="Show Crowdin translation progress.",
+)
+@_crowdin_auth_options
+@_crowdin_project_options
+@click.option("--file-id", type=int, help="Crowdin file ID for file progress")
+@click.option("-l", "--lang", "language", help="Language ID for language progress")
+@_timeout_option
+def crowdin_progress(
+    token: str,
+    organization: str | None,
+    base_url: str | None,
+    project_id: int | None,
+    project_name: str | None,
+    file_id: int | None,
+    language: str | None,
+    timeout_seconds: int,
+) -> None:
+    """Show Crowdin project, file, or language progress.
+
+    Raises:
+        click.ClickException: If loading progress fails.
+    """
+    try:
+        click.echo(
+            crowdin_get_progress(
+                token=token,
+                organization=organization,
+                base_url=base_url,
+                project_id=project_id,
+                project=project_name,
+                file_id=file_id,
+                language=language,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    except (CrowdinException, RequestException, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@crowdin.command(
     "download",
     context_settings=CONTEXT_SETTINGS,
     help="Download a translation file from Crowdin.",
 )
-@click.option(
-    "--token",
-    envvar="AITRAN_CROWDIN_TOKEN",
-    required=True,
-    help="Crowdin API token",
-)
-@click.option(
-    "--organization",
-    envvar="AITRAN_CROWDIN_ORG",
-    help="Crowdin organization (Enterprise only)",
-)
-@click.option(
-    "--base-url",
-    envvar="AITRAN_CROWDIN_BASE_URL",
-    help="Crowdin API base URL override",
-)
-@click.option("--project-id", type=int, help="Crowdin project ID")
-@click.option("--project", "project_name", help="Crowdin project name")
+@_crowdin_auth_options
+@_crowdin_project_options
 @click.option("--file-id", type=int, help="Crowdin file ID")
 @click.option("-l", "--lang", "language", required=True, help="Target language code")
 @click.option(
@@ -536,14 +763,7 @@ def crowdin() -> None:
     type=click.Path(dir_okay=False),
     help="Output file path",
 )
-@click.option(
-    "--timeout",
-    "timeout_seconds",
-    type=click.IntRange(min=1),
-    default=120,
-    show_default=True,
-    help="Timeout (seconds) for API operations",
-)
+@_timeout_option
 def crowdin_download(
     token: str,
     organization: str | None,
@@ -582,24 +802,8 @@ def crowdin_download(
     context_settings=CONTEXT_SETTINGS,
     help="Upload a translation file to Crowdin.",
 )
-@click.option(
-    "--token",
-    envvar="AITRAN_CROWDIN_TOKEN",
-    required=True,
-    help="Crowdin API token",
-)
-@click.option(
-    "--organization",
-    envvar="AITRAN_CROWDIN_ORG",
-    help="Crowdin organization (Enterprise only)",
-)
-@click.option(
-    "--base-url",
-    envvar="AITRAN_CROWDIN_BASE_URL",
-    help="Crowdin API base URL override",
-)
-@click.option("--project-id", type=int, help="Crowdin project ID")
-@click.option("--project", "project_name", help="Crowdin project name")
+@_crowdin_auth_options
+@_crowdin_project_options
 @click.option("--file-id", type=int, help="Crowdin file ID")
 @click.option("-l", "--lang", "language", required=True, help="Target language code")
 @click.option(
@@ -609,14 +813,7 @@ def crowdin_download(
     type=click.Path(exists=True, dir_okay=False),
     help="Translation file to upload",
 )
-@click.option(
-    "--timeout",
-    "timeout_seconds",
-    type=click.IntRange(min=1),
-    default=120,
-    show_default=True,
-    help="Timeout (seconds) for API operations",
-)
+@_timeout_option
 def crowdin_upload(
     token: str,
     organization: str | None,

@@ -17,6 +17,9 @@ class _FakeWeblate:
         self.last_object_path = path
         return self.translation
 
+    def list_projects(self):
+        return [{"slug": "project", "name": "Project"}]
+
     def raw_request(self, method: str, url: str) -> bytes:
         self.last_raw_request = (method, url)
         return b"payload"
@@ -30,6 +33,12 @@ class _FakeTranslation:
     def download(self, convert: str | None = None, q: str | None = None) -> bytes:
         self.last_download = (convert, q)
         return b"payload"
+
+    def list(self):
+        return [{"language_code": "zh", "translated_percent": 50}]
+
+    def statistics(self):
+        return {"total": 10, "translated": 5}
 
     def upload(self, _file, **kwargs):
         self.last_data = kwargs
@@ -61,6 +70,40 @@ def test_weblate_download_writes_file(tmp_path, monkeypatch):
     assert fake.url == "https://example.com/api/"
     assert fake.last_object_path == "project/component/zh"
     assert fake.translation.last_download == ("po", None)
+
+
+def test_weblate_list_objects(monkeypatch):
+    fake = _FakeWeblate(key="token", url="https://example.com/api/")
+
+    def _factory(*, key, url):
+        fake.key = key
+        fake.url = url
+        return fake
+
+    monkeypatch.setattr(weblate, "Weblate", _factory)
+
+    assert weblate.list_objects(
+        url="https://example.com",
+        token="token",
+        object_path="project/component",
+    ) == [{"language_code": "zh", "translated_percent": 50}]
+
+
+def test_weblate_get_stats(monkeypatch):
+    fake = _FakeWeblate(key="token", url="https://example.com/api/")
+
+    def _factory(*, key, url):
+        fake.key = key
+        fake.url = url
+        return fake
+
+    monkeypatch.setattr(weblate, "Weblate", _factory)
+
+    assert weblate.get_stats(
+        url="https://example.com",
+        token="token",
+        object_path="project/component/zh",
+    ) == {"total": 10, "translated": 5}
 
 
 def test_weblate_download_format(tmp_path, monkeypatch):
