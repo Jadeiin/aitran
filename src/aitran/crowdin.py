@@ -204,6 +204,166 @@ def _client_url_options(base_url: str | None) -> dict[str, str | None]:
     return {"base_url": normalized, "http_protocol": scheme}
 
 
+def list_projects(
+    *,
+    token: str,
+    organization: str | None,
+    base_url: str | None,
+    timeout_seconds: int,
+) -> list[dict]:
+    """List Crowdin projects.
+
+    Args:
+        token: Crowdin API token.
+        organization: Crowdin organization (Enterprise only).
+        base_url: Optional API base URL override.
+        timeout_seconds: Timeout for API operations.
+
+    Returns:
+        Project dictionaries.
+    """
+    client = CrowdinClient(
+        token=token,
+        organization=organization,
+        timeout=timeout_seconds,
+        **_client_url_options(base_url),
+    )
+    return _items(client.projects.with_fetch_all().list_projects())
+
+
+def list_files(
+    *,
+    token: str,
+    organization: str | None,
+    base_url: str | None,
+    project_id: int | None,
+    project: str | None,
+    timeout_seconds: int,
+) -> list[dict]:
+    """List Crowdin source files for a project.
+
+    Args:
+        token: Crowdin API token.
+        organization: Crowdin organization (Enterprise only).
+        base_url: Optional API base URL override.
+        project_id: Optional Crowdin project ID.
+        project: Optional Crowdin project name.
+        timeout_seconds: Timeout for API operations.
+
+    Returns:
+        Source file dictionaries.
+    """
+    client = CrowdinClient(
+        token=token,
+        organization=organization,
+        project_id=project_id,
+        timeout=timeout_seconds,
+        **_client_url_options(base_url),
+    )
+    project_id = _resolve_project_id(client, project_id=project_id, project=project)
+    return _items(client.source_files.with_fetch_all().list_files(projectId=project_id))
+
+
+def list_languages(
+    *,
+    token: str,
+    organization: str | None,
+    base_url: str | None,
+    project_id: int | None,
+    project: str | None,
+    timeout_seconds: int,
+) -> list[dict]:
+    """List Crowdin supported languages.
+
+    Args:
+        token: Crowdin API token.
+        organization: Crowdin organization (Enterprise only).
+        base_url: Optional API base URL override.
+        project_id: Optional Crowdin project ID.
+        project: Optional Crowdin project name.
+        timeout_seconds: Timeout for API operations.
+
+    Returns:
+        Language dictionaries, filtered to the project languages when specified.
+    """
+    client = CrowdinClient(
+        token=token,
+        organization=organization,
+        project_id=project_id,
+        timeout=timeout_seconds,
+        **_client_url_options(base_url),
+    )
+    languages = _items(client.languages.with_fetch_all().list_supported_languages())
+    if project_id is None and project is None:
+        return languages
+
+    project_id = _resolve_project_id(client, project_id=project_id, project=project)
+    project_payload = client.projects.get_project(projectId=project_id)
+    project_data = project_payload.get("data", project_payload)
+    language_ids = set(project_data.get("targetLanguageIds") or [])
+    source_language = project_data.get("sourceLanguageId")
+    if source_language:
+        language_ids.add(source_language)
+    if not language_ids:
+        return languages
+    return [item for item in languages if item.get("id") in language_ids]
+
+
+def get_progress(
+    *,
+    token: str,
+    organization: str | None,
+    base_url: str | None,
+    project_id: int | None,
+    project: str | None,
+    file_id: int | None,
+    language: str | None,
+    timeout_seconds: int,
+) -> list[dict]:
+    """Return Crowdin translation progress.
+
+    Args:
+        token: Crowdin API token.
+        organization: Crowdin organization (Enterprise only).
+        base_url: Optional API base URL override.
+        project_id: Optional Crowdin project ID.
+        project: Optional Crowdin project name.
+        file_id: Optional Crowdin file ID for file progress.
+        language: Optional language ID for language progress.
+        timeout_seconds: Timeout for API operations.
+
+    Returns:
+        Progress dictionaries.
+    """
+    client = CrowdinClient(
+        token=token,
+        organization=organization,
+        project_id=project_id,
+        timeout=timeout_seconds,
+        **_client_url_options(base_url),
+    )
+    project_id = _resolve_project_id(client, project_id=project_id, project=project)
+    if file_id is not None:
+        return _items(
+            client.translation_status.with_fetch_all().get_file_progress(
+                fileId=file_id,
+                projectId=project_id,
+            )
+        )
+    if language:
+        return _items(
+            client.translation_status.with_fetch_all().get_language_progress(
+                languageId=language,
+                projectId=project_id,
+            )
+        )
+    return _items(
+        client.translation_status.with_fetch_all().get_project_progress(
+            projectId=project_id
+        )
+    )
+
+
 def download_translation(
     *,
     token: str,

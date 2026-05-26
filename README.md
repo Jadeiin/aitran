@@ -125,20 +125,26 @@ Update PO file from POT template, preserving existing translations.
 ### weblate
 
 ```
+aitran weblate ls [<project/component/lang>]
+aitran weblate stats <project/component/lang>
 aitran weblate download --url <url> --token <token> --object <project/component/lang> -o <file> [--format <format>] [--untranslated-only]
 aitran weblate upload --url <url> --token <token> --object <project/component/lang> --file <file> [--method <method>] [--fuzzy <mode>]
 ```
 
-Download or upload a Weblate translation file for the specified project/component.
+Inspect, download, or upload Weblate translation files for the specified project/component.
 
 ### crowdin
 
 ```
+aitran crowdin projects --token <token>
+aitran crowdin files --token <token> (--project-id <id> | --project <name>)
+aitran crowdin languages --token <token> [--project-id <id> | --project <name>]
+aitran crowdin progress --token <token> (--project-id <id> | --project <name>) [--file-id <id>] [-l <lang>]
 aitran crowdin download --token <token> (--project-id <id> | --project <name>) [--file-id <id>] -l <lang> -o <file.xliff>
 aitran crowdin upload --token <token> --project-id <id> --file-id <id> -l <lang> --file <file>
 ```
 
-Download or upload a Crowdin translation file for the specified project file ID. Crowdin download infers XLIFF export format from the `.xliff` output path.
+Inspect, download, or upload Crowdin translation files for the specified project file ID. Crowdin download infers XLIFF export format from the `.xliff`/`.xlf` output path.
 
 ### remove
 

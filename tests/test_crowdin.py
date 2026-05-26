@@ -44,12 +44,25 @@ class _FakeStorages:
 
 class _FakeProjects:
     def __init__(self) -> None:
-        self.projects = [{"data": {"id": 1, "name": "demo"}}]
+        self.projects = [
+            {
+                "data": {
+                    "id": 1,
+                    "name": "demo",
+                    "sourceLanguageId": "en",
+                    "targetLanguageIds": ["zh-CN"],
+                }
+            }
+        ]
         self.fetch_all_called = False
 
     def with_fetch_all(self):
         self.fetch_all_called = True
         return self
+
+    def get_project(self, projectId=None):
+        del projectId
+        return self.projects[0]
 
     def list_projects(self):
         return {"data": self.projects}
@@ -59,10 +72,56 @@ class _FakeSourceFiles:
     def __init__(self) -> None:
         self.files = [{"data": {"id": 2, "path": "/messages.xliff"}}]
         self.last_project_id: int | None = None
+        self.fetch_all_called = False
+
+    def with_fetch_all(self):
+        self.fetch_all_called = True
+        return self
 
     def list_files(self, projectId=None):
         self.last_project_id = projectId
         return {"data": self.files}
+
+
+class _FakeLanguages:
+    def __init__(self) -> None:
+        self.languages = [
+            {"data": {"id": "en", "name": "English"}},
+            {"data": {"id": "zh-CN", "name": "Chinese Simplified"}},
+            {"data": {"id": "fr", "name": "French"}},
+        ]
+        self.fetch_all_called = False
+
+    def with_fetch_all(self):
+        self.fetch_all_called = True
+        return self
+
+    def list_supported_languages(self):
+        return {"data": self.languages}
+
+
+class _FakeTranslationStatus:
+    def __init__(self) -> None:
+        self.project_progress = [{"data": {"languageId": "zh-CN", "progress": 50}}]
+        self.file_progress = [{"data": {"languageId": "zh-CN", "progress": 60}}]
+        self.language_progress = [{"data": {"fileId": 2, "progress": 70}}]
+        self.fetch_all_called = False
+
+    def with_fetch_all(self):
+        self.fetch_all_called = True
+        return self
+
+    def get_project_progress(self, projectId=None):
+        del projectId
+        return {"data": self.project_progress}
+
+    def get_file_progress(self, fileId, projectId=None):
+        del fileId, projectId
+        return {"data": self.file_progress}
+
+    def get_language_progress(self, languageId, projectId=None):
+        del languageId, projectId
+        return {"data": self.language_progress}
 
 
 class _FakeCrowdinClient:
@@ -71,6 +130,8 @@ class _FakeCrowdinClient:
         self.kwargs = _kwargs
         self.projects = _FakeProjects()
         self.source_files = _FakeSourceFiles()
+        self.languages = _FakeLanguages()
+        self.translation_status = _FakeTranslationStatus()
         self.translations = _FakeTranslations(export_payload=export_payload)
         self.storages = _FakeStorages()
 
@@ -157,6 +218,58 @@ def test_crowdin_download_normalizes_base_url(tmp_path, monkeypatch):
 
     assert fake_client.kwargs["base_url"] == "api.crowdin.com/api/v2/"
     assert fake_client.kwargs["http_protocol"] == "https"
+
+
+def test_crowdin_lists_projects_files_languages_and_progress(monkeypatch):
+    fake_client = _FakeCrowdinClient()
+
+    def _factory(*_args, **_kwargs):
+        return fake_client
+
+    monkeypatch.setattr(crowdin, "CrowdinClient", _factory)
+
+    assert crowdin.list_projects(
+        token="token",
+        organization=None,
+        base_url=None,
+        timeout_seconds=5,
+    ) == [
+        {
+            "id": 1,
+            "name": "demo",
+            "sourceLanguageId": "en",
+            "targetLanguageIds": ["zh-CN"],
+        }
+    ]
+    assert crowdin.list_files(
+        token="token",
+        organization=None,
+        base_url=None,
+        project_id=1,
+        project=None,
+        timeout_seconds=5,
+    ) == [{"id": 2, "path": "/messages.xliff"}]
+    assert crowdin.list_languages(
+        token="token",
+        organization=None,
+        base_url=None,
+        project_id=1,
+        project=None,
+        timeout_seconds=5,
+    ) == [
+        {"id": "en", "name": "English"},
+        {"id": "zh-CN", "name": "Chinese Simplified"},
+    ]
+    assert crowdin.get_progress(
+        token="token",
+        organization=None,
+        base_url=None,
+        project_id=1,
+        project=None,
+        file_id=None,
+        language=None,
+        timeout_seconds=5,
+    ) == [{"languageId": "zh-CN", "progress": 50}]
 
 
 def test_crowdin_download_request_error(monkeypatch, tmp_path):
