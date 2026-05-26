@@ -15,6 +15,7 @@ class _FakeTranslations:
         export_payload: dict | None = None,
     ) -> None:
         self.last_export: dict | None = None
+        self.last_upload: dict | None = None
         self.export_payload = export_payload or {
             "data": {"url": "https://example.com/file.xliff"}
         }
@@ -34,6 +35,21 @@ class _FakeTranslations:
             "fileIds": file_ids,
         }
         return self.export_payload
+
+    def upload_translation(
+        self,
+        targetLanguageId,
+        storageId,
+        fileId,
+        projectId=None,
+    ):
+        self.last_upload = {
+            "targetLanguageId": targetLanguageId,
+            "storageId": storageId,
+            "fileId": fileId,
+            "projectId": projectId,
+        }
+        return {"data": {"id": 7}}
 
 
 class _FakeStorages:
@@ -347,3 +363,35 @@ def test_crowdin_download_lists_files_when_file_id_missing(tmp_path, monkeypatch
             base_url=None,
             timeout_seconds=5,
         )
+    assert fake_client.source_files.fetch_all_called
+
+
+def test_crowdin_upload_uses_storage_and_resolved_ids(tmp_path, monkeypatch):
+    upload_path = tmp_path / "messages.xliff"
+    upload_path.write_bytes(b"content")
+    fake_client = _FakeCrowdinClient()
+
+    def _factory(*_args, **_kwargs):
+        return fake_client
+
+    monkeypatch.setattr(crowdin, "CrowdinClient", _factory)
+
+    crowdin.upload_translation(
+        token="token",
+        project_id=None,
+        project="demo",
+        file_id=2,
+        language="zh-CN",
+        file_path=str(upload_path),
+        organization=None,
+        base_url=None,
+        timeout_seconds=5,
+    )
+
+    assert fake_client.projects.fetch_all_called
+    assert fake_client.translations.last_upload == {
+        "targetLanguageId": "zh-CN",
+        "storageId": 42,
+        "fileId": 2,
+        "projectId": 1,
+    }
