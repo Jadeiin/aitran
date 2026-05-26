@@ -9,21 +9,25 @@ class _FakeWeblate:
     def __init__(self, key: str, url: str) -> None:
         self.key = key
         self.url = url
-        self.last_method: str | None = None
-        self.last_path: str | None = None
-        self.last_params: dict | None = None
+        self.last_object_path: str | None = None
+        self.translation = _FakeTranslation()
+
+    def get_object(self, path: str):
+        self.last_object_path = path
+        return self.translation
+
+
+class _FakeTranslation:
+    def __init__(self) -> None:
+        self.last_convert: str | None = None
         self.last_data: dict | None = None
 
-    def raw_request(self, method: str, path: str, params: dict | None = None) -> bytes:
-        self.last_method = method
-        self.last_path = path
-        self.last_params = params
+    def download(self, convert: str | None = None) -> bytes:
+        self.last_convert = convert
         return b"payload"
 
-    def request(self, method: str, path: str, **request_options):
-        self.last_method = method
-        self.last_path = path
-        self.last_data = request_options.get("data")
+    def upload(self, _file, **kwargs):
+        self.last_data = kwargs
         return {"ok": True}
 
 
@@ -37,22 +41,20 @@ def test_weblate_download_writes_file(tmp_path, monkeypatch):
         return fake
 
     monkeypatch.setattr(weblate, "Weblate", _factory)
+    monkeypatch.setattr(weblate, "Translation", _FakeTranslation)
 
     weblate.download_translation(
         url="https://example.com",
         token="token",
-        project="project",
-        component="component",
-        language="zh",
+        object_path="project/component/zh",
         output_path=str(output_path),
         convert=None,
     )
 
     assert output_path.read_bytes() == b"payload"
     assert fake.url == "https://example.com/api/"
-    assert fake.last_method == "GET"
-    assert fake.last_path == "translations/project/component/zh/file/"
-    assert fake.last_params == {}
+    assert fake.last_object_path == "project/component/zh"
+    assert fake.translation.last_convert is None
 
 
 def test_weblate_download_convert(tmp_path, monkeypatch):
@@ -65,19 +67,18 @@ def test_weblate_download_convert(tmp_path, monkeypatch):
         return fake
 
     monkeypatch.setattr(weblate, "Weblate", _factory)
+    monkeypatch.setattr(weblate, "Translation", _FakeTranslation)
 
     weblate.download_translation(
         url="https://example.com",
         token="token",
-        project="project",
-        component="component",
-        language="zh",
+        object_path="project/component/zh",
         output_path=str(output_path),
         convert="xliff",
     )
 
     assert output_path.read_bytes() == b"payload"
-    assert fake.last_params == {"format": "xliff"}
+    assert fake.translation.last_convert == "xliff"
 
 
 def test_weblate_upload_sets_method_and_fuzzy(tmp_path, monkeypatch):
@@ -91,18 +92,16 @@ def test_weblate_upload_sets_method_and_fuzzy(tmp_path, monkeypatch):
         return fake
 
     monkeypatch.setattr(weblate, "Weblate", _factory)
+    monkeypatch.setattr(weblate, "Translation", _FakeTranslation)
 
     weblate.upload_translation(
         url="https://example.com",
         token="token",
-        project="project",
-        component="component",
-        language="zh",
+        object_path="project/component/zh",
         file_path=str(upload_path),
         method="replace",
         fuzzy="process",
     )
 
-    assert fake.last_method == "POST"
-    assert fake.last_path == "translations/project/component/zh/upload/"
-    assert fake.last_data == {"method": "replace", "fuzzy": "process"}
+    assert fake.last_object_path == "project/component/zh"
+    assert fake.translation.last_data == {"method": "replace", "fuzzy": "process"}

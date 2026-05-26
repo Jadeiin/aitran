@@ -4,27 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from wlc.client import Weblate
+from wlc.client import Translation, Weblate
 
 _ALLOWED_EXTENSIONS = {".po", ".pot", ".xliff", ".xlf"}
-
-
-def normalize_weblate_url(url: str) -> str:
-    """Normalize Weblate base URL to the REST API root.
-
-    Returns:
-        Normalized API base URL.
-
-    Raises:
-        ValueError: If the URL is empty.
-    """
-    url = url.strip()
-    if not url:
-        raise ValueError("Weblate URL is required.")
-    url = url.rstrip("/")
-    if not url.endswith("/api"):
-        url = f"{url}/api"
-    return f"{url}/"
 
 
 def _ensure_translation_extension(path: str) -> None:
@@ -45,9 +27,7 @@ def download_translation(
     *,
     url: str,
     token: str,
-    project: str,
-    component: str,
-    language: str,
+    object_path: str,
     output_path: str,
     convert: str | None,
 ) -> None:
@@ -56,22 +36,29 @@ def download_translation(
     Args:
         url: Weblate base URL.
         token: Weblate API token.
-        project: Weblate project slug.
-        component: Weblate component slug.
-        language: Target language code.
+        object_path: Weblate translation object path (<project>/<component>/<language>).
         output_path: Local output file path.
         convert: Optional format to convert on the server.
 
+    Raises:
+        ValueError: If URL or file extension is invalid.
+        TypeError: If object path does not point to a translation.
+
     """
     _ensure_translation_extension(output_path)
-    api_url = normalize_weblate_url(url)
+    api_url = url.strip().rstrip("/")
+    if not api_url:
+        raise ValueError("Weblate URL is required.")
+    if not api_url.endswith("/api"):
+        api_url = f"{api_url}/api"
+    api_url = f"{api_url}/"
     client = Weblate(key=token, url=api_url)
-    params = {"format": convert} if convert else {}
-    content = client.raw_request(
-        "GET",
-        f"translations/{project}/{component}/{language}/file/",
-        params=params,
-    )
+    obj = client.get_object(object_path)
+    if not isinstance(obj, Translation):
+        raise TypeError(
+            "Weblate object must be in <project>/<component>/<language> format."
+        )
+    content = obj.download(convert)
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(content)
@@ -81,9 +68,7 @@ def upload_translation(
     *,
     url: str,
     token: str,
-    project: str,
-    component: str,
-    language: str,
+    object_path: str,
     file_path: str,
     method: str,
     fuzzy: str | None,
@@ -93,23 +78,31 @@ def upload_translation(
     Args:
         url: Weblate base URL.
         token: Weblate API token.
-        project: Weblate project slug.
-        component: Weblate component slug.
-        language: Target language code.
+        object_path: Weblate translation object path (<project>/<component>/<language>).
         file_path: Local translation file path.
         method: Upload method (translate, replace, etc.).
         fuzzy: Optional handling for fuzzy strings.
 
+    Raises:
+        ValueError: If URL or file extension is invalid.
+        TypeError: If object path does not point to a translation.
+
     """
     _ensure_translation_extension(file_path)
-    client = Weblate(key=token, url=normalize_weblate_url(url))
-    data = {"method": method}
+    api_url = url.strip().rstrip("/")
+    if not api_url:
+        raise ValueError("Weblate URL is required.")
+    if not api_url.endswith("/api"):
+        api_url = f"{api_url}/api"
+    api_url = f"{api_url}/"
+    client = Weblate(key=token, url=api_url)
+    obj = client.get_object(object_path)
+    if not isinstance(obj, Translation):
+        raise TypeError(
+            "Weblate object must be in <project>/<component>/<language> format."
+        )
+    data: dict[str, str] = {"method": method}
     if fuzzy:
         data["fuzzy"] = fuzzy
     with open(file_path, "rb") as handle:
-        client.request(
-            "POST",
-            f"translations/{project}/{component}/{language}/upload/",
-            files={"file": handle},
-            data=data,
-        )
+        obj.upload(handle, **data)
