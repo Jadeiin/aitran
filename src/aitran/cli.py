@@ -424,7 +424,7 @@ def weblate_download(
             download_format=download_format,
             untranslated_only=untranslated_only,
         )
-    except (TypeError, ValueError, WeblateException) as exc:
+    except (TypeError, ValueError, WeblateException, RequestException) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo("Download complete.")
 
@@ -493,7 +493,7 @@ def weblate_upload(
             method=method,
             fuzzy=fuzzy,
         )
-    except (TypeError, ValueError, WeblateException) as exc:
+    except (TypeError, ValueError, WeblateException, RequestException) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo("Upload complete.")
 

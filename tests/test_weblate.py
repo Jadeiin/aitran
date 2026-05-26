@@ -88,6 +88,30 @@ def test_weblate_download_format(tmp_path, monkeypatch):
     assert fake.translation.last_download == ("xliff11", "is:untranslated")
 
 
+def test_weblate_download_xlf_uses_xliff_format(tmp_path, monkeypatch):
+    output_path = tmp_path / "messages.xlf"
+    fake = _FakeWeblate(key="token", url="https://example.com/api/")
+
+    def _factory(*, key, url):
+        fake.key = key
+        fake.url = url
+        return fake
+
+    monkeypatch.setattr(weblate, "Weblate", _factory)
+    monkeypatch.setattr(weblate, "Translation", _FakeTranslation)
+
+    weblate.download_translation(
+        url="https://example.com",
+        token="token",
+        object_path="project/component/zh",
+        output_path=str(output_path),
+        download_format=None,
+        untranslated_only=False,
+    )
+
+    assert fake.translation.last_download == ("xliff", None)
+
+
 def test_weblate_upload_sets_method_and_fuzzy(tmp_path, monkeypatch):
     upload_path = tmp_path / "messages.po"
     upload_path.write_bytes(b"content")
