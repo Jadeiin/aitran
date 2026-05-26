@@ -360,7 +360,11 @@ def weblate() -> None:
     """Download or upload translation files using Weblate."""
 
 
-@weblate.command("download", context_settings=CONTEXT_SETTINGS)
+@weblate.command(
+    "download",
+    context_settings=CONTEXT_SETTINGS,
+    help="Download a translation file from Weblate.",
+)
 @click.option(
     "--url",
     envvar="AITRAN_WEBLATE_URL",
@@ -417,7 +421,11 @@ def weblate_download(
     click.echo("Download complete.")
 
 
-@weblate.command("upload", context_settings=CONTEXT_SETTINGS)
+@weblate.command(
+    "upload",
+    context_settings=CONTEXT_SETTINGS,
+    help="Upload a translation file to Weblate.",
+)
 @click.option(
     "--url",
     envvar="AITRAN_WEBLATE_URL",
@@ -487,7 +495,11 @@ def crowdin() -> None:
     """Download or upload translation files using Crowdin."""
 
 
-@crowdin.command("download", context_settings=CONTEXT_SETTINGS)
+@crowdin.command(
+    "download",
+    context_settings=CONTEXT_SETTINGS,
+    help="Download a translation file from Crowdin.",
+)
 @click.option(
     "--token",
     envvar="AITRAN_CROWDIN_TOKEN",
@@ -573,7 +585,11 @@ def crowdin_download(
     click.echo("Download complete.")
 
 
-@crowdin.command("upload", context_settings=CONTEXT_SETTINGS)
+@crowdin.command(
+    "upload",
+    context_settings=CONTEXT_SETTINGS,
+    help="Upload a translation file to Crowdin.",
+)
 @click.option(
     "--token",
     envvar="AITRAN_CROWDIN_TOKEN",

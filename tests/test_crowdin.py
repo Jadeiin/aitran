@@ -71,7 +71,8 @@ class _FakeStorages:
 
 class _FakeCrowdinClient:
     def __init__(self, *_args, **_kwargs) -> None:
-        del _args, _kwargs
+        del _args
+        self.kwargs = _kwargs
         self.translations = _FakeTranslations()
         self.storages = _FakeStorages()
 
@@ -166,6 +167,18 @@ def test_wait_for_export_timeout(monkeypatch):
         )
 
 
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        ("https://api.crowdin.com/api/v2", "api.crowdin.com/api/v2/"),
+        ("https://api.crowdin.com/api/v2/", "api.crowdin.com/api/v2/"),
+        ("api.crowdin.com/api/v2", "api.crowdin.com/api/v2/"),
+    ],
+)
+def test_normalize_crowdin_base_url(base_url, expected):
+    assert crowdin._normalize_crowdin_base_url(base_url) == expected
+
+
 def test_crowdin_download_writes_file(tmp_path, monkeypatch):
     output_path = tmp_path / "out.po"
     fake_client = _FakeCrowdinClient()
@@ -202,6 +215,37 @@ def test_crowdin_download_writes_file(tmp_path, monkeypatch):
         "format": ExportProjectTranslationFormat.XLIFF,
         "fileIds": [2],
     }
+
+
+def test_crowdin_download_normalizes_base_url(tmp_path, monkeypatch):
+    output_path = tmp_path / "out.xliff"
+    fake_client = _FakeCrowdinClient()
+
+    def _fake_get(*_args, **_kwargs):
+        return _FakeResponse()
+
+    def _factory(*_args, **kwargs):
+        fake_client.kwargs = kwargs
+        return fake_client
+
+    monkeypatch.setattr(crowdin, "CrowdinClient", _factory)
+    monkeypatch.setattr(crowdin.requests, "get", _fake_get)
+
+    crowdin.download_translation(
+        token="token",
+        project_id=1,
+        file_id=2,
+        language="zh",
+        export_format=ExportProjectTranslationFormat.XLIFF,
+        output_path=str(output_path),
+        organization=None,
+        base_url="https://api.crowdin.com/api/v2",
+        timeout_seconds=5,
+        poll_interval=1,
+    )
+
+    assert fake_client.kwargs["base_url"] == "api.crowdin.com/api/v2/"
+    assert fake_client.kwargs["http_protocol"] == "https"
 
 
 def test_crowdin_download_request_error(monkeypatch, tmp_path):

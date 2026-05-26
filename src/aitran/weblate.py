@@ -6,7 +6,7 @@ from pathlib import Path
 
 from wlc.client import Translation, Weblate
 
-_ALLOWED_EXTENSIONS = {".po", ".pot", ".xliff", ".xlf"}
+_ALLOWED_EXTENSIONS = {".po", ".xliff"}
 
 
 def _normalize_weblate_api_url(url: str) -> str:
@@ -40,7 +40,7 @@ def _ensure_translation_extension(path: str) -> None:
     """
     ext = Path(path).suffix.lower()
     if ext not in _ALLOWED_EXTENSIONS:
-        raise ValueError("Only .po, .pot, .xliff, or .xlf files are supported.")
+        raise ValueError("Only .po or .xliff files are supported.")
 
 
 def download_translation(

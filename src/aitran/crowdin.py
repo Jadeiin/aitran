@@ -5,12 +5,13 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 from crowdin_api import CrowdinClient
 from crowdin_api.api_resources.enums import ExportProjectTranslationFormat
 
-_ALLOWED_EXTENSIONS = {".po", ".pot", ".xliff", ".xlf"}
+_ALLOWED_EXTENSIONS = {".po", ".xliff"}
 
 
 def _ensure_translation_extension(path: str) -> None:
@@ -24,7 +25,54 @@ def _ensure_translation_extension(path: str) -> None:
     """
     ext = Path(path).suffix.lower()
     if ext not in _ALLOWED_EXTENSIONS:
-        raise ValueError("Only .po, .pot, .xliff, or .xlf files are supported.")
+        raise ValueError("Only .po or .xliff files are supported.")
+
+
+def _normalize_crowdin_base_url(url: str) -> str:
+    """Normalize Crowdin base URL to the SDK's host/path form.
+
+    Args:
+        url: Crowdin base URL override.
+
+    Returns:
+        Base URL without scheme and with a trailing slash.
+
+    Raises:
+        ValueError: If the URL is empty or uses an unsupported scheme.
+    """
+    parsed = urlsplit(url.strip().rstrip("/"))
+    if parsed.scheme and parsed.scheme not in {"http", "https"}:
+        raise ValueError("Crowdin base URL must use http or https.")
+    if parsed.scheme or parsed.netloc:
+        base_url = f"{parsed.netloc}{parsed.path}"
+    else:
+        base_url = parsed.path
+    base_url = base_url.strip("/")
+    if not base_url:
+        raise ValueError("Crowdin base URL is required.")
+    return f"{base_url}/"
+
+
+def _crowdin_http_protocol(url: str | None) -> str | None:
+    """Extract the SDK http_protocol value from a URL override.
+
+    Args:
+        url: Optional Crowdin base URL override.
+
+    Returns:
+        URL scheme for the SDK, or None when no scheme was provided.
+
+    Raises:
+        ValueError: If the URL uses an unsupported scheme.
+    """
+    if not url:
+        return None
+    scheme = urlsplit(url.strip()).scheme
+    if not scheme:
+        return None
+    if scheme not in {"http", "https"}:
+        raise ValueError("Crowdin base URL must use http or https.")
+    return scheme
 
 
 def _extract_data_field(payload: dict, field: str, context: str) -> Any:
@@ -141,12 +189,14 @@ def download_translation(
     Raises:
         RequestException: If downloading the build output fails.
     """
+    _ensure_translation_extension(output_path)
     client = CrowdinClient(
         token=token,
         organization=organization,
-        base_url=base_url,
+        base_url=_normalize_crowdin_base_url(base_url) if base_url else None,
         project_id=project_id,
         timeout=timeout_seconds,
+        http_protocol=_crowdin_http_protocol(base_url),
     )
     export_payload = client.translations.export_project_translation(
         language,
@@ -204,9 +254,10 @@ def upload_translation(
     client = CrowdinClient(
         token=token,
         organization=organization,
-        base_url=base_url,
+        base_url=_normalize_crowdin_base_url(base_url) if base_url else None,
         project_id=project_id,
         timeout=timeout_seconds,
+        http_protocol=_crowdin_http_protocol(base_url),
     )
     with open(file_path, "rb") as handle:
         storage_payload = client.storages.add_storage(handle)

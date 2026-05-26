@@ -58,7 +58,7 @@ def test_weblate_download_writes_file(tmp_path, monkeypatch):
 
 
 def test_weblate_download_convert(tmp_path, monkeypatch):
-    output_path = tmp_path / "messages.xlf"
+    output_path = tmp_path / "messages.xliff"
     fake = _FakeWeblate(key="token", url="https://example.com/api/")
 
     def _factory(*, key, url):
