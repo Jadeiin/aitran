@@ -24,8 +24,8 @@ def _translation_format(path: str) -> ExportProjectTranslationFormat:
         ValueError: If the path extension is unsupported.
     """
     ext = Path(path).suffix.lower()
-    if ext != ".xliff":
-        raise ValueError("Only .xliff files are supported.")
+    if ext not in {".xliff", ".xlf"}:
+        raise ValueError("Only .xliff or .xlf files are supported.")
     return ExportProjectTranslationFormat.XLIFF
 
 

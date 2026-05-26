@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from wlc.client import Translation, Weblate
 
 _DOWNLOAD_FORMATS = {"po", "xliff11", "xliff"}
-_OUTPUT_FORMATS = {".po": "po", ".xliff": "xliff"}
+_OUTPUT_FORMATS = {".po": "po", ".xliff": "xliff", ".xlf": "xliff"}
 _ALLOWED_EXTENSIONS = set(_OUTPUT_FORMATS)
 
 
@@ -68,7 +68,7 @@ def _ensure_translation_extension(path: str) -> None:
     """
     ext = Path(path).suffix.lower()
     if ext not in _ALLOWED_EXTENSIONS:
-        raise ValueError("Only .po or .xliff files are supported.")
+        raise ValueError("Only .po, .xliff, or .xlf files are supported.")
 
 
 def _format_from_output_path(path: str) -> str:

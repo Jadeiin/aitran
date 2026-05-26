@@ -91,7 +91,7 @@ def test_normalize_crowdin_base_url(base_url, expected):
 
 
 def test_crowdin_download_writes_file(tmp_path, monkeypatch):
-    output_path = tmp_path / "out.xliff"
+    output_path = tmp_path / "out.xlf"
     fake_client = _FakeCrowdinClient()
 
     def _fake_get(*_args, **_kwargs):
