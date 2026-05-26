@@ -11,7 +11,8 @@ import requests
 from crowdin_api import CrowdinClient
 from crowdin_api.api_resources.enums import ExportProjectTranslationFormat
 
-_ALLOWED_EXTENSIONS = {".po", ".xliff"}
+_OUTPUT_FORMATS = {".xliff": ExportProjectTranslationFormat.XLIFF}
+_ALLOWED_EXTENSIONS = set(_OUTPUT_FORMATS)
 
 
 def _ensure_translation_extension(path: str) -> None:
@@ -25,7 +26,20 @@ def _ensure_translation_extension(path: str) -> None:
     """
     ext = Path(path).suffix.lower()
     if ext not in _ALLOWED_EXTENSIONS:
-        raise ValueError("Only .po or .xliff files are supported.")
+        raise ValueError("Only .xliff files are supported.")
+
+
+def _format_from_output_path(path: str) -> ExportProjectTranslationFormat:
+    """Infer Crowdin export format from an output path.
+
+    Args:
+        path: Output file path.
+
+    Returns:
+        Crowdin export format matching the output suffix.
+    """
+    _ensure_translation_extension(path)
+    return _OUTPUT_FORMATS[Path(path).suffix.lower()]
 
 
 def _normalize_crowdin_base_url(url: str) -> str:
@@ -163,9 +177,6 @@ def download_translation(
     project_id: int,
     file_id: int,
     language: str,
-    export_format: ExportProjectTranslationFormat = (
-        ExportProjectTranslationFormat.XLIFF
-    ),
     output_path: str,
     organization: str | None,
     base_url: str | None,
@@ -179,7 +190,6 @@ def download_translation(
         project_id: Crowdin project ID.
         file_id: Crowdin file ID.
         language: Target language code.
-        export_format: Export file format for the download.
         output_path: Local output file path.
         organization: Crowdin organization (Enterprise only).
         base_url: Optional API base URL override.
@@ -198,6 +208,7 @@ def download_translation(
         timeout=timeout_seconds,
         http_protocol=_crowdin_http_protocol(base_url),
     )
+    export_format = _format_from_output_path(output_path)
     export_payload = client.translations.export_project_translation(
         language,
         projectId=project_id,

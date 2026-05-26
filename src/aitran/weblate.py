@@ -3,10 +3,38 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlencode
 
 from wlc.client import Translation, Weblate
 
-_ALLOWED_EXTENSIONS = {".po", ".xliff"}
+_DOWNLOAD_FORMATS = {"po", "xliff11", "xliff"}
+_OUTPUT_FORMATS = {".po": "po", ".xliff": "xliff"}
+_ALLOWED_EXTENSIONS = set(_OUTPUT_FORMATS)
+
+
+def _patch_translation_download() -> None:
+    """Patch Weblate Translation.download to support filtered downloads."""
+
+    def _download(
+        self: Translation,
+        convert: str | None = None,
+        q: str | None = None,
+    ) -> bytes:
+        params = {}
+        if convert is not None:
+            params["format"] = convert
+        if q is not None:
+            params["q"] = q
+
+        url = self._get_stored("file_url")
+        if params:
+            url = f"{url}?{urlencode(params)}"
+        return self.weblate.raw_request("get", url)
+
+    Translation.download = _download
+
+
+_patch_translation_download()
 
 
 def _normalize_weblate_api_url(url: str) -> str:
@@ -43,13 +71,47 @@ def _ensure_translation_extension(path: str) -> None:
         raise ValueError("Only .po or .xliff files are supported.")
 
 
+def _format_from_output_path(path: str) -> str:
+    """Infer Weblate download format from an output path.
+
+    Args:
+        path: Output file path.
+
+    Returns:
+        Weblate download format matching the output suffix.
+    """
+    _ensure_translation_extension(path)
+    return _OUTPUT_FORMATS[Path(path).suffix.lower()]
+
+
+def _normalize_download_format(download_format: str | None, output_path: str) -> str:
+    """Resolve explicit or inferred Weblate download format.
+
+    Args:
+        download_format: Optional Weblate download format.
+        output_path: Local output file path.
+
+    Returns:
+        Weblate download format to request.
+
+    Raises:
+        ValueError: If the requested format is unsupported.
+    """
+    if download_format is None:
+        return _format_from_output_path(output_path)
+    if download_format not in _DOWNLOAD_FORMATS:
+        raise ValueError("Only po, xliff11, or xliff download formats are supported.")
+    return download_format
+
+
 def download_translation(
     *,
     url: str,
     token: str,
     object_path: str,
     output_path: str,
-    convert: str | None,
+    download_format: str | None,
+    untranslated_only: bool,
 ) -> None:
     """Download a translation file from Weblate.
 
@@ -58,13 +120,14 @@ def download_translation(
         token: Weblate API token.
         object_path: Weblate translation object path (<project>/<component>/<language>).
         output_path: Local output file path.
-        convert: Optional format to convert on the server.
+        download_format: Optional format to download from the server.
+        untranslated_only: Whether to download only untranslated strings.
 
     Raises:
         TypeError: If object path does not target a translation resource.
 
     """
-    _ensure_translation_extension(output_path)
+    resolved_format = _normalize_download_format(download_format, output_path)
     client = Weblate(key=token, url=_normalize_weblate_api_url(url))
     obj = client.get_object(object_path)
     if not isinstance(obj, Translation):
@@ -72,7 +135,10 @@ def download_translation(
             "Weblate object path must point to a translation resource "
             "(<project>/<component>/<language>)."
         )
-    content = obj.download(convert)
+    content = obj.download(
+        resolved_format,
+        q="is:untranslated" if untranslated_only else None,
+    )
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(content)

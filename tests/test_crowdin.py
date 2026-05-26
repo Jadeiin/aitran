@@ -180,7 +180,7 @@ def test_normalize_crowdin_base_url(base_url, expected):
 
 
 def test_crowdin_download_writes_file(tmp_path, monkeypatch):
-    output_path = tmp_path / "out.po"
+    output_path = tmp_path / "out.xliff"
     fake_client = _FakeCrowdinClient()
     fake_client.translations.requester.expected_path = (
         "projects/1/translations/exports/export-17"
@@ -200,7 +200,6 @@ def test_crowdin_download_writes_file(tmp_path, monkeypatch):
         project_id=1,
         file_id=2,
         language="zh",
-        export_format=ExportProjectTranslationFormat.XLIFF,
         output_path=str(output_path),
         organization=None,
         base_url=None,
@@ -236,7 +235,6 @@ def test_crowdin_download_normalizes_base_url(tmp_path, monkeypatch):
         project_id=1,
         file_id=2,
         language="zh",
-        export_format=ExportProjectTranslationFormat.XLIFF,
         output_path=str(output_path),
         organization=None,
         base_url="https://api.crowdin.com/api/v2",
@@ -269,8 +267,7 @@ def test_crowdin_download_request_error(monkeypatch, tmp_path):
             project_id=1,
             file_id=2,
             language="zh",
-            export_format=ExportProjectTranslationFormat.XLIFF,
-            output_path=str(tmp_path / "out.po"),
+            output_path=str(tmp_path / "out.xliff"),
             organization=None,
             base_url=None,
             timeout_seconds=5,
