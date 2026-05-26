@@ -9,6 +9,26 @@ from wlc.client import Translation, Weblate
 _ALLOWED_EXTENSIONS = {".po", ".pot", ".xliff", ".xlf"}
 
 
+def _build_weblate_api_url(url: str) -> str:
+    """Normalize Weblate base URL to API root.
+
+    Args:
+        url: Weblate base URL.
+
+    Returns:
+        Normalized API URL ending with `/api/`.
+
+    Raises:
+        ValueError: If URL is empty.
+    """
+    api_url = url.strip().rstrip("/")
+    if not api_url:
+        raise ValueError("Weblate URL is required.")
+    if not api_url.endswith("/api"):
+        api_url = f"{api_url}/api"
+    return f"{api_url}/"
+
+
 def _ensure_translation_extension(path: str) -> None:
     """Validate that the file path uses a supported translation extension.
 
@@ -41,22 +61,16 @@ def download_translation(
         convert: Optional format to convert on the server.
 
     Raises:
-        ValueError: If URL or file extension is invalid.
-        TypeError: If object path does not point to a translation.
+        TypeError: If object path does not target a translation resource.
 
     """
     _ensure_translation_extension(output_path)
-    api_url = url.strip().rstrip("/")
-    if not api_url:
-        raise ValueError("Weblate URL is required.")
-    if not api_url.endswith("/api"):
-        api_url = f"{api_url}/api"
-    api_url = f"{api_url}/"
-    client = Weblate(key=token, url=api_url)
+    client = Weblate(key=token, url=_build_weblate_api_url(url))
     obj = client.get_object(object_path)
     if not isinstance(obj, Translation):
         raise TypeError(
-            "Weblate object must be in <project>/<component>/<language> format."
+            "Weblate object path must point to a translation resource "
+            "(<project>/<component>/<language>)."
         )
     content = obj.download(convert)
     out_path = Path(output_path)
@@ -84,22 +98,16 @@ def upload_translation(
         fuzzy: Optional handling for fuzzy strings.
 
     Raises:
-        ValueError: If URL or file extension is invalid.
-        TypeError: If object path does not point to a translation.
+        TypeError: If object path does not target a translation resource.
 
     """
     _ensure_translation_extension(file_path)
-    api_url = url.strip().rstrip("/")
-    if not api_url:
-        raise ValueError("Weblate URL is required.")
-    if not api_url.endswith("/api"):
-        api_url = f"{api_url}/api"
-    api_url = f"{api_url}/"
-    client = Weblate(key=token, url=api_url)
+    client = Weblate(key=token, url=_build_weblate_api_url(url))
     obj = client.get_object(object_path)
     if not isinstance(obj, Translation):
         raise TypeError(
-            "Weblate object must be in <project>/<component>/<language> format."
+            "Weblate object path must point to a translation resource "
+            "(<project>/<component>/<language>)."
         )
     data: dict[str, str] = {"method": method}
     if fuzzy:
