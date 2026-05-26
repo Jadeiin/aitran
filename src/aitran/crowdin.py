@@ -159,7 +159,9 @@ def _resolve_file_id(
     if file_id is not None:
         return file_id
 
-    files = _items(client.source_files.list_files(projectId=project_id))
+    files = _items(
+        client.source_files.with_fetch_all().list_files(projectId=project_id)
+    )
     choices = _choice_lines(files, name_field="path", limit=50)
     raise ValueError(
         "Crowdin file ID is required. Use --file-id with one of:"

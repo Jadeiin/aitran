@@ -125,8 +125,8 @@ Update PO file from POT template, preserving existing translations.
 ### weblate
 
 ```
-aitran weblate ls [<project/component/lang>]
-aitran weblate stats <project/component/lang>
+aitran weblate ls [<project[/component[/lang]]>]
+aitran weblate stats <project[/component[/lang]]>
 aitran weblate download --url <url> --token <token> --object <project/component/lang> -o <file> [--format <format>] [--untranslated-only]
 aitran weblate upload --url <url> --token <token> --object <project/component/lang> --file <file> [--method <method>] [--fuzzy <mode>]
 ```

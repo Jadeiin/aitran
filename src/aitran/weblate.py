@@ -14,31 +14,6 @@ _OUTPUT_FORMATS = {".po": "po", ".xliff": "xliff", ".xlf": "xliff"}
 _ALLOWED_EXTENSIONS = set(_OUTPUT_FORMATS)
 
 
-def _patch_translation_download() -> None:
-    """Patch Weblate Translation.download to support filtered downloads."""
-
-    def _download(
-        self: Translation,
-        convert: str | None = None,
-        q: str | None = None,
-    ) -> bytes:
-        params = {}
-        if convert is not None:
-            params["format"] = convert
-        if q is not None:
-            params["q"] = q
-
-        url = self._get_stored("file_url")
-        if params:
-            url = f"{url}?{urlencode(params)}"
-        return self.weblate.raw_request("get", url)
-
-    Translation.download = _download
-
-
-_patch_translation_download()
-
-
 def _normalize_weblate_api_url(url: str) -> str:
     """Normalize Weblate base URL to API root.
 
@@ -155,11 +130,36 @@ def _normalize_download_format(download_format: str | None, output_path: str) ->
     Raises:
         ValueError: If the requested format is unsupported.
     """
+    _ensure_translation_extension(output_path)
     if download_format is None:
         return _format_from_output_path(output_path)
     if download_format not in _DOWNLOAD_FORMATS:
         raise ValueError("Only po, xliff11, or xliff download formats are supported.")
     return download_format
+
+
+def _download_translation_content(
+    translation: Translation,
+    download_format: str,
+    *,
+    untranslated_only: bool,
+) -> bytes:
+    """Download translation content without mutating the Weblate SDK class.
+
+    Args:
+        translation: Weblate translation object.
+        download_format: Server-side conversion format.
+        untranslated_only: Whether to request only untranslated strings.
+
+    Returns:
+        Downloaded file bytes.
+    """
+    if not untranslated_only:
+        return translation.download(download_format)
+
+    params = {"format": download_format, "q": "is:untranslated"}
+    url = f"{translation._get_stored('file_url')}?{urlencode(params)}"
+    return translation.weblate.raw_request("get", url)
 
 
 def download_translation(
@@ -193,9 +193,10 @@ def download_translation(
             "Weblate object path must point to a translation resource "
             "(<project>/<component>/<language>)."
         )
-    content = obj.download(
+    content = _download_translation_content(
+        obj,
         resolved_format,
-        q="is:untranslated" if untranslated_only else None,
+        untranslated_only=untranslated_only,
     )
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
