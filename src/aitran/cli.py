@@ -46,7 +46,7 @@ def _parse_weblate_object(value: str) -> tuple[str, str, str]:
     parts = [part for part in value.strip("/").split("/") if part]
     if len(parts) != 3:
         raise click.ClickException(
-            "Weblate object must be in '<project>/<component>/<language>' format."
+            "Weblate object must be in <project>/<component>/<language> format."
         )
     project, component, language = parts
     return project, component, language
