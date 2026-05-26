@@ -4,6 +4,7 @@ import sys
 from importlib.resources import files
 
 import click
+from crowdin_api.api_resources.enums import ExportProjectTranslationFormat
 from crowdin_api.exceptions import CrowdinException
 from requests import RequestException
 from wlc.client import WeblateException
@@ -29,6 +30,25 @@ from aitran.weblate import download_translation as weblate_download_translation
 from aitran.weblate import upload_translation as weblate_upload_translation
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+WEBLATE_UPLOAD_METHODS = [
+    "translate",
+    "approve",
+    "suggest",
+    "fuzzy",
+    "replace",
+    "source",
+    "add",
+]
+WEBLATE_FUZZY_CHOICES = ["process", "approve"]
+
+
+def _parse_weblate_object(value: str) -> tuple[str, str, str]:
+    parts = [part for part in value.strip("/").split("/") if part]
+    if len(parts) != 3:
+        raise click.ClickException(
+            "Weblate object must be in '<project>/<component>/<language>' format."
+        )
+    return parts[0], parts[1], parts[2]
 
 
 @click.group(context_settings=CONTEXT_SETTINGS)
@@ -359,9 +379,17 @@ def weblate() -> None:
     required=True,
     help="Weblate API token",
 )
-@click.option("--project", required=True, help="Weblate project slug")
-@click.option("--component", required=True, help="Weblate component slug")
-@click.option("-l", "--lang", "language", required=True, help="Target language code")
+@click.option(
+    "--object",
+    "object_path",
+    required=True,
+    help="Weblate object path (<project>/<component>/<language>)",
+)
+@click.option(
+    "-c",
+    "--convert",
+    help="Convert file format on server (defaults to none)",
+)
 @click.option(
     "-o",
     "--output",
@@ -373,9 +401,8 @@ def weblate() -> None:
 def weblate_download(
     url: str,
     token: str,
-    project: str,
-    component: str,
-    language: str,
+    object_path: str,
+    convert: str | None,
     output_path: str,
 ) -> None:
     """Download a translation file from Weblate.
@@ -384,6 +411,7 @@ def weblate_download(
         click.ClickException: If the download fails.
     """
     try:
+        project, component, language = _parse_weblate_object(object_path)
         weblate_download_translation(
             url=url,
             token=token,
@@ -391,6 +419,7 @@ def weblate_download(
             component=component,
             language=language,
             output_path=output_path,
+            convert=convert,
         )
     except (ValueError, WeblateException) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -410,9 +439,12 @@ def weblate_download(
     required=True,
     help="Weblate API token",
 )
-@click.option("--project", required=True, help="Weblate project slug")
-@click.option("--component", required=True, help="Weblate component slug")
-@click.option("-l", "--lang", "language", required=True, help="Target language code")
+@click.option(
+    "--object",
+    "object_path",
+    required=True,
+    help="Weblate object path (<project>/<component>/<language>)",
+)
 @click.option(
     "--file",
     "file_path",
@@ -421,26 +453,24 @@ def weblate_download(
     help="Translation file to upload",
 )
 @click.option(
-    "--replace/--no-replace",
-    default=True,
+    "--method",
+    type=click.Choice(WEBLATE_UPLOAD_METHODS),
+    default="translate",
     show_default=True,
-    help="Replace existing translations on upload",
+    help="Upload method",
 )
 @click.option(
-    "--fuzzy/--no-fuzzy",
-    default=False,
-    show_default=True,
-    help="Mark imported strings as fuzzy",
+    "--fuzzy",
+    type=click.Choice(WEBLATE_FUZZY_CHOICES),
+    help="Fuzzy string handling",
 )
 def weblate_upload(
     url: str,
     token: str,
-    project: str,
-    component: str,
-    language: str,
+    object_path: str,
     file_path: str,
-    replace: bool,
-    fuzzy: bool,
+    method: str,
+    fuzzy: str | None,
 ) -> None:
     """Upload a translation file to Weblate.
 
@@ -448,6 +478,7 @@ def weblate_upload(
         click.ClickException: If the upload fails.
     """
     try:
+        project, component, language = _parse_weblate_object(object_path)
         weblate_upload_translation(
             url=url,
             token=token,
@@ -455,7 +486,7 @@ def weblate_upload(
             component=component,
             language=language,
             file_path=file_path,
-            replace=replace,
+            method=method,
             fuzzy=fuzzy,
         )
     except (ValueError, WeblateException) as exc:
@@ -489,6 +520,14 @@ def crowdin() -> None:
 @click.option("--file-id", type=int, required=True, help="Crowdin file ID")
 @click.option("-l", "--lang", "language", required=True, help="Target language code")
 @click.option(
+    "--format",
+    "export_format",
+    type=click.Choice([value.value for value in ExportProjectTranslationFormat]),
+    default=ExportProjectTranslationFormat.XLIFF.value,
+    show_default=True,
+    help="Export format",
+)
+@click.option(
     "-o",
     "--output",
     "output_path",
@@ -518,6 +557,7 @@ def crowdin_download(
     project_id: int,
     file_id: int,
     language: str,
+    export_format: str,
     output_path: str,
     timeout_seconds: int,
     poll_interval: int,
@@ -535,6 +575,7 @@ def crowdin_download(
             project_id=project_id,
             file_id=file_id,
             language=language,
+            export_format=ExportProjectTranslationFormat(export_format),
             output_path=output_path,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,

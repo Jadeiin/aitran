@@ -49,6 +49,7 @@ def download_translation(
     component: str,
     language: str,
     output_path: str,
+    convert: str | None,
 ) -> None:
     """Download a translation file from Weblate.
 
@@ -59,14 +60,17 @@ def download_translation(
         component: Weblate component slug.
         language: Target language code.
         output_path: Local output file path.
+        convert: Optional format to convert on the server.
 
     """
     _ensure_translation_extension(output_path)
     api_url = normalize_weblate_url(url)
     client = Weblate(key=token, url=api_url)
+    params = {"format": convert} if convert else None
     content = client.raw_request(
         "GET",
         f"translations/{project}/{component}/{language}/file/",
+        params=params,
     )
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,8 +85,8 @@ def upload_translation(
     component: str,
     language: str,
     file_path: str,
-    replace: bool,
-    fuzzy: bool,
+    method: str,
+    fuzzy: str | None,
 ) -> None:
     """Upload a translation file to Weblate.
 
@@ -93,17 +97,19 @@ def upload_translation(
         component: Weblate component slug.
         language: Target language code.
         file_path: Local translation file path.
-        replace: Whether to replace existing translations.
-        fuzzy: Whether to mark imported strings as fuzzy.
+        method: Upload method (translate, replace, etc.).
+        fuzzy: Optional handling for fuzzy strings.
 
     """
     _ensure_translation_extension(file_path)
     client = Weblate(key=token, url=normalize_weblate_url(url))
-    params = {"replace": str(replace).lower(), "fuzzy": str(fuzzy).lower()}
+    data = {"method": method}
+    if fuzzy:
+        data["fuzzy"] = fuzzy
     with open(file_path, "rb") as handle:
         client.request(
             "POST",
             f"translations/{project}/{component}/{language}/upload/",
             files={"file": handle},
-            params=params,
+            data=data,
         )

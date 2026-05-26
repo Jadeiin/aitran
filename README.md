@@ -125,8 +125,8 @@ Update PO file from POT template, preserving existing translations.
 ### weblate
 
 ```
-aitran weblate download --url <url> --token <token> --project <slug> --component <slug> -l <lang> -o <file>
-aitran weblate upload --url <url> --token <token> --project <slug> --component <slug> -l <lang> --file <file>
+aitran weblate download --url <url> --token <token> --object <project/component/lang> -o <file> [--convert <format>]
+aitran weblate upload --url <url> --token <token> --object <project/component/lang> --file <file> [--method <method>] [--fuzzy <mode>]
 ```
 
 Download or upload a Weblate translation file for the specified project/component.
@@ -134,7 +134,7 @@ Download or upload a Weblate translation file for the specified project/componen
 ### crowdin
 
 ```
-aitran crowdin download --token <token> --project-id <id> --file-id <id> -l <lang> -o <file>
+aitran crowdin download --token <token> --project-id <id> --file-id <id> -l <lang> --format xliff -o <file>
 aitran crowdin upload --token <token> --project-id <id> --file-id <id> -l <lang> --file <file>
 ```
 
