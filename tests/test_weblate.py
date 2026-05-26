@@ -21,7 +21,7 @@ class _FakeWeblate:
         return b"payload"
 
     def request(self, method: str, path: str, files=None, data=None):
-        del files
+        _ = files
         self.last_method = method
         self.last_path = path
         self.last_data = data
