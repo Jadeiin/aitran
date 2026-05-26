@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -58,6 +59,24 @@ def _normalize_weblate_api_url(url: str) -> str:
     return f"{api_url}/"
 
 
+def _ensure_list(value: Any) -> list[Any]:
+    """Return SDK list-like results as a list.
+
+    Args:
+        value: Value returned by an SDK `list()` method.
+
+    Returns:
+        A list of objects, wrapping non-iterable objects.
+    """
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, Iterator):
+        return list(value)
+    return [value]
+
+
 def list_objects(*, url: str, token: str, object_path: str | None) -> list[Any]:
     """List Weblate objects like `wlc ls`.
 
@@ -71,7 +90,7 @@ def list_objects(*, url: str, token: str, object_path: str | None) -> list[Any]:
     """
     client = Weblate(key=token, url=_normalize_weblate_api_url(url))
     if object_path:
-        return list(client.get_object(object_path).list())
+        return _ensure_list(client.get_object(object_path).list())
     return list(client.list_projects())
 
 
@@ -86,11 +105,14 @@ def get_stats(*, url: str, token: str, object_path: str) -> Any:
     Returns:
         Statistics returned by the SDK.
     """
-    return (
+    stats = (
         Weblate(key=token, url=_normalize_weblate_api_url(url))
         .get_object(object_path)
         .statistics()
     )
+    if isinstance(stats, Iterator):
+        return list(stats)
+    return stats
 
 
 def _ensure_translation_extension(path: str) -> None:
