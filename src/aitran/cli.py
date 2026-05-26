@@ -40,6 +40,9 @@ WEBLATE_UPLOAD_METHODS = [
     "add",
 ]
 WEBLATE_FUZZY_CHOICES = ["process", "approve"]
+CROWDIN_EXPORT_FORMAT_CHOICES = [
+    value.value for value in ExportProjectTranslationFormat
+]
 
 
 def _parse_weblate_object(value: str) -> tuple[str, str, str]:
@@ -523,7 +526,7 @@ def crowdin() -> None:
 @click.option(
     "--format",
     "export_format",
-    type=click.Choice([value.value for value in ExportProjectTranslationFormat]),
+    type=click.Choice(CROWDIN_EXPORT_FORMAT_CHOICES),
     default=ExportProjectTranslationFormat.XLIFF.value,
     show_default=True,
     help="Export format",
