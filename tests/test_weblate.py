@@ -10,20 +10,25 @@ class _FakeWeblate:
         self.key = key
         self.url = url
         self.last_object_path: str | None = None
+        self.last_raw_request: tuple[str, str] | None = None
         self.translation = _FakeTranslation()
 
     def get_object(self, path: str):
         self.last_object_path = path
         return self.translation
 
+    def raw_request(self, method: str, url: str) -> bytes:
+        self.last_raw_request = (method, url)
+        return b"payload"
+
 
 class _FakeTranslation:
     def __init__(self) -> None:
-        self.last_convert: str | None = None
         self.last_data: dict | None = None
+        self.last_download: tuple[str | None, str | None] | None = None
 
-    def download(self, convert: str | None = None) -> bytes:
-        self.last_convert = convert
+    def download(self, convert: str | None = None, q: str | None = None) -> bytes:
+        self.last_download = (convert, q)
         return b"payload"
 
     def upload(self, _file, **kwargs):
@@ -48,16 +53,17 @@ def test_weblate_download_writes_file(tmp_path, monkeypatch):
         token="token",
         object_path="project/component/zh",
         output_path=str(output_path),
-        convert=None,
+        download_format=None,
+        untranslated_only=False,
     )
 
     assert output_path.read_bytes() == b"payload"
     assert fake.url == "https://example.com/api/"
     assert fake.last_object_path == "project/component/zh"
-    assert fake.translation.last_convert is None
+    assert fake.translation.last_download == ("po", None)
 
 
-def test_weblate_download_convert(tmp_path, monkeypatch):
+def test_weblate_download_format(tmp_path, monkeypatch):
     output_path = tmp_path / "messages.xliff"
     fake = _FakeWeblate(key="token", url="https://example.com/api/")
 
@@ -74,11 +80,12 @@ def test_weblate_download_convert(tmp_path, monkeypatch):
         token="token",
         object_path="project/component/zh",
         output_path=str(output_path),
-        convert="xliff",
+        download_format="xliff11",
+        untranslated_only=True,
     )
 
     assert output_path.read_bytes() == b"payload"
-    assert fake.translation.last_convert == "xliff"
+    assert fake.translation.last_download == ("xliff11", "is:untranslated")
 
 
 def test_weblate_upload_sets_method_and_fuzzy(tmp_path, monkeypatch):

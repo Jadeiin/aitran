@@ -4,7 +4,6 @@ import sys
 from importlib.resources import files
 
 import click
-from crowdin_api.api_resources.enums import ExportProjectTranslationFormat
 from crowdin_api.exceptions import CrowdinException
 from requests import RequestException
 from wlc.client import WeblateException
@@ -40,9 +39,7 @@ WEBLATE_UPLOAD_METHODS = [
     "add",
 ]
 WEBLATE_FUZZY_CHOICES = ["process", "approve"]
-CROWDIN_EXPORT_FORMAT_CHOICES = [
-    value.value for value in ExportProjectTranslationFormat
-]
+WEBLATE_DOWNLOAD_FORMATS = ["po", "xliff11", "xliff"]
 
 
 @click.group(context_settings=CONTEXT_SETTINGS)
@@ -384,9 +381,16 @@ def weblate() -> None:
     help="Weblate object path (<project>/<component>/<language>)",
 )
 @click.option(
-    "-c",
-    "--convert",
-    help="Convert file format on server (defaults to none)",
+    "-f",
+    "--format",
+    "download_format",
+    type=click.Choice(WEBLATE_DOWNLOAD_FORMATS),
+    help="Download format (defaults to output extension)",
+)
+@click.option(
+    "--untranslated-only",
+    is_flag=True,
+    help="Download only untranslated strings",
 )
 @click.option(
     "-o",
@@ -400,7 +404,8 @@ def weblate_download(
     url: str,
     token: str,
     object_path: str,
-    convert: str | None,
+    download_format: str | None,
+    untranslated_only: bool,
     output_path: str,
 ) -> None:
     """Download a translation file from Weblate.
@@ -414,7 +419,8 @@ def weblate_download(
             token=token,
             object_path=object_path,
             output_path=output_path,
-            convert=convert,
+            download_format=download_format,
+            untranslated_only=untranslated_only,
         )
     except (TypeError, ValueError, WeblateException) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -520,14 +526,6 @@ def crowdin() -> None:
 @click.option("--file-id", type=int, required=True, help="Crowdin file ID")
 @click.option("-l", "--lang", "language", required=True, help="Target language code")
 @click.option(
-    "--format",
-    "export_format",
-    type=click.Choice(CROWDIN_EXPORT_FORMAT_CHOICES),
-    default=ExportProjectTranslationFormat.XLIFF.value,
-    show_default=True,
-    help="Export format",
-)
-@click.option(
     "-o",
     "--output",
     "output_path",
@@ -557,7 +555,6 @@ def crowdin_download(
     project_id: int,
     file_id: int,
     language: str,
-    export_format: str,
     output_path: str,
     timeout_seconds: int,
     poll_interval: int,
@@ -575,7 +572,6 @@ def crowdin_download(
             project_id=project_id,
             file_id=file_id,
             language=language,
-            export_format=ExportProjectTranslationFormat(export_format),
             output_path=output_path,
             timeout_seconds=timeout_seconds,
             poll_interval=poll_interval,
