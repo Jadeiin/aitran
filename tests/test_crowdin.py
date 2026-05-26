@@ -15,8 +15,7 @@ class _FakeRequester:
     def __init__(self, statuses: list[str] | None = None) -> None:
         self._statuses = iter(statuses or ["finished"])
 
-    def request(self, method, path=None, **_kwargs):
-        _ = path
+    def request(self, method, **_kwargs):
         assert method == "get"
         try:
             status = next(self._statuses)
