@@ -6,33 +6,48 @@ from types import SimpleNamespace
 
 import pytest
 import requests
+from crowdin_api.api_resources.enums import ExportProjectTranslationFormat
 
 from aitran import crowdin
 
 
-class _FakeTranslations:
+class _FakeRequester:
     def __init__(self, statuses: list[str] | None = None) -> None:
         self._statuses = iter(statuses or ["finished"])
 
-    def build_project_file_translation(self, file_id, language, projectId=None):
-        del file_id, language, projectId
-        return {"data": {"id": 17}}
-
-    def check_project_build_status(self, build_id, projectId=None):
-        del build_id, projectId
+    def request(self, method, path, **_kwargs):
+        del path
+        assert method == "get"
         try:
             status = next(self._statuses)
         except StopIteration:
             status = "inProgress"
-        return {"data": {"status": status}}
+        payload = {"data": {"status": status}}
+        if status == "finished":
+            payload["data"]["url"] = "https://example.com/file.po"
+        return payload
 
-    def download_project_translations(self, build_id, projectId=None):
-        del build_id, projectId
-        return {"data": {"url": "https://example.com/file.po"}}
 
-    def upload_translation(self, language, storage_id, file_id, projectId=None):
-        del language, storage_id, file_id, projectId
-        return {"data": {"id": 1}}
+class _FakeTranslations:
+    def __init__(self, statuses: list[str] | None = None) -> None:
+        self.requester = _FakeRequester(statuses)
+        self.last_export: dict | None = None
+
+    def export_project_translation(
+        self,
+        targetLanguageId,
+        projectId=None,
+        format=None,
+        fileIds=None,
+        **_kwargs,
+    ):
+        self.last_export = {
+            "targetLanguageId": targetLanguageId,
+            "projectId": projectId,
+            "format": format,
+            "fileIds": fileIds,
+        }
+        return {"data": {"identifier": "export-17"}}
 
 
 class _FakeStorages:
@@ -56,42 +71,43 @@ class _FakeResponse:
         return None
 
 
-def test_wait_for_build_finished():
+def test_wait_for_export_finished():
     client = SimpleNamespace(translations=_FakeTranslations(["finished"]))
-    crowdin._wait_for_build(
+    url = crowdin._wait_for_export(
         client,
-        build_id=1,
+        export_id="export",
         project_id=2,
         timeout_seconds=5,
         poll_interval=1,
     )
+    assert url == "https://example.com/file.po"
 
 
-def test_wait_for_build_failed():
+def test_wait_for_export_failed():
     client = SimpleNamespace(translations=_FakeTranslations(["failed"]))
     with pytest.raises(ValueError, match="ended with status"):
-        crowdin._wait_for_build(
+        crowdin._wait_for_export(
             client,
-            build_id=1,
+            export_id="export",
             project_id=2,
             timeout_seconds=5,
             poll_interval=1,
         )
 
 
-def test_wait_for_build_canceled():
+def test_wait_for_export_canceled():
     client = SimpleNamespace(translations=_FakeTranslations(["canceled"]))
     with pytest.raises(ValueError, match="ended with status"):
-        crowdin._wait_for_build(
+        crowdin._wait_for_export(
             client,
-            build_id=1,
+            export_id="export",
             project_id=2,
             timeout_seconds=5,
             poll_interval=1,
         )
 
 
-def test_wait_for_build_timeout(monkeypatch):
+def test_wait_for_export_timeout(monkeypatch):
     class _FakeTime:
         def __init__(self) -> None:
             self.now = 0.0
@@ -108,9 +124,9 @@ def test_wait_for_build_timeout(monkeypatch):
 
     client = SimpleNamespace(translations=_FakeTranslations(["inProgress"]))
     with pytest.raises(TimeoutError, match="Timed out"):
-        crowdin._wait_for_build(
+        crowdin._wait_for_export(
             client,
-            build_id=1,
+            export_id="export",
             project_id=2,
             timeout_seconds=2,
             poll_interval=1,
@@ -119,11 +135,15 @@ def test_wait_for_build_timeout(monkeypatch):
 
 def test_crowdin_download_writes_file(tmp_path, monkeypatch):
     output_path = tmp_path / "out.po"
+    fake_client = _FakeCrowdinClient()
 
     def _fake_get(*_args, **_kwargs):
         return _FakeResponse()
 
-    monkeypatch.setattr(crowdin, "CrowdinClient", _FakeCrowdinClient)
+    def _factory(*_args, **_kwargs):
+        return fake_client
+
+    monkeypatch.setattr(crowdin, "CrowdinClient", _factory)
     monkeypatch.setattr(crowdin.requests, "get", _fake_get)
 
     crowdin.download_translation(
@@ -131,6 +151,7 @@ def test_crowdin_download_writes_file(tmp_path, monkeypatch):
         project_id=1,
         file_id=2,
         language="zh",
+        export_format=ExportProjectTranslationFormat.XLIFF,
         output_path=str(output_path),
         organization=None,
         base_url=None,
@@ -139,6 +160,12 @@ def test_crowdin_download_writes_file(tmp_path, monkeypatch):
     )
 
     assert output_path.read_bytes() == b"data"
+    assert fake_client.translations.last_export == {
+        "targetLanguageId": "zh",
+        "projectId": 1,
+        "format": ExportProjectTranslationFormat.XLIFF,
+        "fileIds": [2],
+    }
 
 
 def test_crowdin_download_request_error(monkeypatch, tmp_path):
@@ -154,6 +181,7 @@ def test_crowdin_download_request_error(monkeypatch, tmp_path):
             project_id=1,
             file_id=2,
             language="zh",
+            export_format=ExportProjectTranslationFormat.XLIFF,
             output_path=str(tmp_path / "out.po"),
             organization=None,
             base_url=None,
