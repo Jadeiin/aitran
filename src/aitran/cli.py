@@ -48,7 +48,8 @@ def _parse_weblate_object(value: str) -> tuple[str, str, str]:
         raise click.ClickException(
             "Weblate object must be in '<project>/<component>/<language>' format."
         )
-    return parts[0], parts[1], parts[2]
+    project, component, language = parts
+    return project, component, language
 
 
 @click.group(context_settings=CONTEXT_SETTINGS)
