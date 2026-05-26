@@ -29,16 +29,21 @@ class _FakeTranslation:
     def __init__(self) -> None:
         self.last_data: dict | None = None
         self.last_download: tuple[str | None, str | None] | None = None
+        self.list_result = [{"language_code": "zh", "translated_percent": 50}]
+        self.stats_result = {"total": 10, "translated": 5}
 
     def download(self, convert: str | None = None, q: str | None = None) -> bytes:
         self.last_download = (convert, q)
         return b"payload"
 
     def list(self):
-        return [{"language_code": "zh", "translated_percent": 50}]
+        return self.list_result
 
     def statistics(self):
-        return {"total": 10, "translated": 5}
+        return self.stats_result
+
+    def __iter__(self):
+        return iter(())
 
     def upload(self, _file, **kwargs):
         self.last_data = kwargs
@@ -89,6 +94,24 @@ def test_weblate_list_objects(monkeypatch):
     ) == [{"language_code": "zh", "translated_percent": 50}]
 
 
+def test_weblate_list_objects_wraps_translation_object(monkeypatch):
+    fake = _FakeWeblate(key="token", url="https://example.com/api/")
+    fake.translation.list_result = fake.translation
+
+    def _factory(*, key, url):
+        fake.key = key
+        fake.url = url
+        return fake
+
+    monkeypatch.setattr(weblate, "Weblate", _factory)
+
+    assert weblate.list_objects(
+        url="https://example.com",
+        token="token",
+        object_path="project/component/zh",
+    ) == [fake.translation]
+
+
 def test_weblate_get_stats(monkeypatch):
     fake = _FakeWeblate(key="token", url="https://example.com/api/")
 
@@ -104,6 +127,30 @@ def test_weblate_get_stats(monkeypatch):
         token="token",
         object_path="project/component/zh",
     ) == {"total": 10, "translated": 5}
+
+
+def test_weblate_get_stats_materializes_component_iterator(monkeypatch):
+    fake = _FakeWeblate(key="token", url="https://example.com/api/")
+    fake.translation.stats_result = iter([
+        {"language_code": "zh", "translated": 5},
+        {"language_code": "fr", "translated": 3},
+    ])
+
+    def _factory(*, key, url):
+        fake.key = key
+        fake.url = url
+        return fake
+
+    monkeypatch.setattr(weblate, "Weblate", _factory)
+
+    assert weblate.get_stats(
+        url="https://example.com",
+        token="token",
+        object_path="project/component",
+    ) == [
+        {"language_code": "zh", "translated": 5},
+        {"language_code": "fr", "translated": 3},
+    ]
 
 
 def test_weblate_download_format(tmp_path, monkeypatch):
