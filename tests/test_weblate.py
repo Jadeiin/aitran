@@ -20,11 +20,10 @@ class _FakeWeblate:
         self.last_params = params
         return b"payload"
 
-    def request(self, method: str, path: str, files=None, data=None):
-        _ = files
+    def request(self, method: str, path: str, **kwargs):
         self.last_method = method
         self.last_path = path
-        self.last_data = data
+        self.last_data = kwargs.get("data")
         return {"ok": True}
 
 
