@@ -29,6 +29,13 @@ from aitran.dicts import find_matching_entries
 if TYPE_CHECKING:
     from aitran.agent import TranslatedUnit
 
+_LEGACY_LANGUAGE_CODES = {
+    "zh_Hans": "zh_CN",
+    "zh_Hant": "zh_TW",
+    "zh_Hans_SG": "zh_SG",
+    "zh_Hant_HK": "zh_HK",
+}
+
 
 def _read_context(context_file: str | None) -> str:
     if not context_file:
@@ -90,7 +97,11 @@ class PoTranslator:
         Returns:
             Target language string, or None if no language can be inferred.
         """
-        return po_file.gettargetlanguage()
+        if target_language := po_file.gettargetlanguage():
+            return target_language
+
+        language_header = po_file.parseheader().get("Language", "").strip()
+        return _LEGACY_LANGUAGE_CODES.get(language_header)
 
     @staticmethod
     def get_untranslated(po_file: po.pofile) -> list[po.pounit]:
