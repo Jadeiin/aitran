@@ -14,7 +14,7 @@ class _FakeWeblate:
         self.last_params: dict | None = None
         self.last_data: dict | None = None
 
-    def raw_request(self, method: str, path: str, params=None) -> bytes:
+    def raw_request(self, method: str, path: str, params: dict | None = None) -> bytes:
         self.last_method = method
         self.last_path = path
         self.last_params = params

@@ -37,14 +37,14 @@ class _FakeTranslations:
         targetLanguageId,
         projectId=None,
         format=None,
-        fileIds=None,
-        **_kwargs,
+        **kwargs,
     ):
+        file_ids = kwargs.get("fileIds")
         self.last_export = {
             "targetLanguageId": targetLanguageId,
             "projectId": projectId,
             "format": format,
-            "fileIds": fileIds,
+            "fileIds": file_ids,
         }
         return {"data": {"identifier": "export-17"}}
 
