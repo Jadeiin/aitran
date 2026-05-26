@@ -115,7 +115,7 @@ def _resolve_project_id(
     if not project:
         raise ValueError("Either Crowdin project ID or project name is required.")
 
-    projects = _items(client.projects.list_projects())
+    projects = _items(client.projects.with_fetch_all().list_projects())
     lowered = project.casefold()
     matches = [
         item for item in projects if str(item.get("name", "")).casefold() == lowered

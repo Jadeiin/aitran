@@ -45,6 +45,11 @@ class _FakeStorages:
 class _FakeProjects:
     def __init__(self) -> None:
         self.projects = [{"data": {"id": 1, "name": "demo"}}]
+        self.fetch_all_called = False
+
+    def with_fetch_all(self):
+        self.fetch_all_called = True
+        return self
 
     def list_projects(self):
         return {"data": self.projects}
@@ -206,6 +211,7 @@ def test_crowdin_download_resolves_project_name(tmp_path, monkeypatch):
     )
 
     assert fake_client.translations.last_export["projectId"] == 1
+    assert fake_client.projects.fetch_all_called
 
 
 def test_crowdin_download_lists_files_when_file_id_missing(tmp_path, monkeypatch):
