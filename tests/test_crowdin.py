@@ -12,10 +12,20 @@ from aitran import crowdin
 
 
 class _FakeRequester:
-    def __init__(self, statuses: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        statuses: list[str] | None = None,
+        expected_path: str | None = None,
+    ) -> None:
         self._statuses = iter(statuses or ["finished"])
+        self.expected_path = expected_path
+        self.last_path: str | None = None
 
     def request(self, method, **_kwargs):
+        path = _kwargs.get("path")
+        self.last_path = path
+        if self.expected_path is not None:
+            assert path == self.expected_path
         assert method == "get"
         try:
             status = next(self._statuses)
@@ -28,8 +38,12 @@ class _FakeRequester:
 
 
 class _FakeTranslations:
-    def __init__(self, statuses: list[str] | None = None) -> None:
-        self.requester = _FakeRequester(statuses)
+    def __init__(
+        self,
+        statuses: list[str] | None = None,
+        expected_path: str | None = None,
+    ) -> None:
+        self.requester = _FakeRequester(statuses, expected_path)
         self.last_export: dict | None = None
 
     def export_project_translation(
@@ -71,7 +85,12 @@ class _FakeResponse:
 
 
 def test_wait_for_export_finished():
-    client = SimpleNamespace(translations=_FakeTranslations(["finished"]))
+    client = SimpleNamespace(
+        translations=_FakeTranslations(
+            ["finished"],
+            expected_path="projects/2/translations/exports/export",
+        )
+    )
     url = crowdin._wait_for_export(
         client,
         export_id="export",
@@ -83,7 +102,12 @@ def test_wait_for_export_finished():
 
 
 def test_wait_for_export_failed():
-    client = SimpleNamespace(translations=_FakeTranslations(["failed"]))
+    client = SimpleNamespace(
+        translations=_FakeTranslations(
+            ["failed"],
+            expected_path="projects/2/translations/exports/export",
+        )
+    )
     with pytest.raises(ValueError, match="ended with status"):
         crowdin._wait_for_export(
             client,
@@ -95,7 +119,12 @@ def test_wait_for_export_failed():
 
 
 def test_wait_for_export_canceled():
-    client = SimpleNamespace(translations=_FakeTranslations(["canceled"]))
+    client = SimpleNamespace(
+        translations=_FakeTranslations(
+            ["canceled"],
+            expected_path="projects/2/translations/exports/export",
+        )
+    )
     with pytest.raises(ValueError, match="ended with status"):
         crowdin._wait_for_export(
             client,
@@ -121,7 +150,12 @@ def test_wait_for_export_timeout(monkeypatch):
     monkeypatch.setattr(crowdin.time, "monotonic", fake_time.monotonic)
     monkeypatch.setattr(crowdin.time, "sleep", fake_time.sleep)
 
-    client = SimpleNamespace(translations=_FakeTranslations(["inProgress"]))
+    client = SimpleNamespace(
+        translations=_FakeTranslations(
+            ["inProgress"],
+            expected_path="projects/2/translations/exports/export",
+        )
+    )
     with pytest.raises(TimeoutError, match="Timed out"):
         crowdin._wait_for_export(
             client,
@@ -135,6 +169,9 @@ def test_wait_for_export_timeout(monkeypatch):
 def test_crowdin_download_writes_file(tmp_path, monkeypatch):
     output_path = tmp_path / "out.po"
     fake_client = _FakeCrowdinClient()
+    fake_client.translations.requester.expected_path = (
+        "projects/1/translations/exports/export-17"
+    )
 
     def _fake_get(*_args, **_kwargs):
         return _FakeResponse()
@@ -171,7 +208,15 @@ def test_crowdin_download_request_error(monkeypatch, tmp_path):
     def _raise(*_args, **_kwargs):
         raise requests.RequestException("boom")
 
-    monkeypatch.setattr(crowdin, "CrowdinClient", _FakeCrowdinClient)
+    fake_client = _FakeCrowdinClient()
+    fake_client.translations.requester.expected_path = (
+        "projects/1/translations/exports/export-17"
+    )
+
+    def _factory(*_args, **_kwargs):
+        return fake_client
+
+    monkeypatch.setattr(crowdin, "CrowdinClient", _factory)
     monkeypatch.setattr(crowdin.requests, "get", _raise)
 
     with pytest.raises(requests.RequestException, match="Failed to download"):

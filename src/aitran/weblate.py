@@ -66,7 +66,7 @@ def download_translation(
     _ensure_translation_extension(output_path)
     api_url = normalize_weblate_url(url)
     client = Weblate(key=token, url=api_url)
-    params = {"format": convert} if convert else None
+    params = {"format": convert} if convert else {}
     content = client.raw_request(
         "GET",
         f"translations/{project}/{component}/{language}/file/",

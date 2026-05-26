@@ -52,7 +52,7 @@ def test_weblate_download_writes_file(tmp_path, monkeypatch):
     assert fake.url == "https://example.com/api/"
     assert fake.last_method == "GET"
     assert fake.last_path == "translations/project/component/zh/file/"
-    assert fake.last_params is None
+    assert fake.last_params == {}
 
 
 def test_weblate_download_convert(tmp_path, monkeypatch):
