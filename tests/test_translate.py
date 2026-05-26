@@ -370,6 +370,43 @@ def test_translate_po_infers_target_language_from_header(monkeypatch, tmp_path):
     assert captured["target_lang"] == "zh_CN"
 
 
+def test_translate_po_infers_legacy_target_language_from_script_header(
+    monkeypatch, tmp_path
+):
+    source = tmp_path / "messages.po"
+    source.write_text(
+        (
+            'msgid ""\n'
+            'msgstr ""\n'
+            '"Language: zh_Hans\\n"\n'
+            '"Content-Type: text/plain; charset=UTF-8\\n"\n'
+            "\n"
+            'msgid "Hello"\n'
+            'msgstr ""\n'
+        ),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_run_translation(**kwargs):
+        captured["target_lang"] = kwargs["target_lang"]
+
+    monkeypatch.setattr("aitran.translate._run_translation", fake_run_translation)
+
+    translate_po(
+        model=DEFAULT_TEST_MODEL,
+        po_path=str(source),
+        source_lang="en",
+        target_lang="",
+        verbose=False,
+        output_path=str(source),
+        context_file=None,
+        context_length=4096,
+    )
+
+    assert captured["target_lang"] == "zh_CN"
+
+
 def test_translate_po_infers_target_language_from_language_team(monkeypatch, tmp_path):
     source = tmp_path / "messages.po"
     source.write_text(
