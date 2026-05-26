@@ -9,7 +9,7 @@ from wlc.client import Translation, Weblate
 _ALLOWED_EXTENSIONS = {".po", ".pot", ".xliff", ".xlf"}
 
 
-def _build_weblate_api_url(url: str) -> str:
+def _normalize_weblate_api_url(url: str) -> str:
     """Normalize Weblate base URL to API root.
 
     Args:
@@ -65,7 +65,7 @@ def download_translation(
 
     """
     _ensure_translation_extension(output_path)
-    client = Weblate(key=token, url=_build_weblate_api_url(url))
+    client = Weblate(key=token, url=_normalize_weblate_api_url(url))
     obj = client.get_object(object_path)
     if not isinstance(obj, Translation):
         raise TypeError(
@@ -102,7 +102,7 @@ def upload_translation(
 
     """
     _ensure_translation_extension(file_path)
-    client = Weblate(key=token, url=_build_weblate_api_url(url))
+    client = Weblate(key=token, url=_normalize_weblate_api_url(url))
     obj = client.get_object(object_path)
     if not isinstance(obj, Translation):
         raise TypeError(
