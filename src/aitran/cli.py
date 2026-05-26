@@ -45,16 +45,6 @@ CROWDIN_EXPORT_FORMAT_CHOICES = [
 ]
 
 
-def _parse_weblate_object(value: str) -> tuple[str, str, str]:
-    parts = [part for part in value.strip("/").split("/") if part]
-    if len(parts) != 3:
-        raise click.ClickException(
-            "Weblate object must be in <project>/<component>/<language> format."
-        )
-    project, component, language = parts
-    return project, component, language
-
-
 @click.group(context_settings=CONTEXT_SETTINGS)
 @click.version_option(message="%(prog)s %(version)s")
 def app() -> None:
@@ -415,17 +405,14 @@ def weblate_download(
         click.ClickException: If the download fails.
     """
     try:
-        project, component, language = _parse_weblate_object(object_path)
         weblate_download_translation(
             url=url,
             token=token,
-            project=project,
-            component=component,
-            language=language,
+            object_path=object_path,
             output_path=output_path,
             convert=convert,
         )
-    except (ValueError, WeblateException) as exc:
+    except (TypeError, ValueError, WeblateException) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo("Download complete.")
 
@@ -482,18 +469,15 @@ def weblate_upload(
         click.ClickException: If the upload fails.
     """
     try:
-        project, component, language = _parse_weblate_object(object_path)
         weblate_upload_translation(
             url=url,
             token=token,
-            project=project,
-            component=component,
-            language=language,
+            object_path=object_path,
             file_path=file_path,
             method=method,
             fuzzy=fuzzy,
         )
-    except (ValueError, WeblateException) as exc:
+    except (TypeError, ValueError, WeblateException) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo("Upload complete.")
 
