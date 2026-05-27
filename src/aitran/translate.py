@@ -150,12 +150,16 @@ class PoTranslator:
     ) -> None:
         """Apply a batch of agent results."""
         for unit, result in zip(units, results, strict=True):
-            target = xml_helpers.valid_chars_only(result.target)
+            cleaned = [
+                xml_helpers.valid_chars_only(t) for t in result.targets
+            ]
             if unit.hasplural():
                 target = po.pounit.sync_plural_count(
-                    multistring(target),
+                    multistring(cleaned),
                     po_file.get_plural_tags(),
                 )
+            else:
+                target = cleaned[0]
             unit.target = target
             unit.markfuzzy(result.fuzzy)
             if result.note:
@@ -230,7 +234,7 @@ class XliffTranslator:
     ) -> None:
         """Apply translation results to XLIFF units."""
         for unit, result in zip(units, results, strict=True):
-            unit.settarget(xml_helpers.valid_chars_only(result.target))
+            unit.settarget(xml_helpers.valid_chars_only(result.targets[0]))
             if result.fuzzy:
                 unit.markreviewneeded()
             else:
@@ -265,7 +269,12 @@ async def _translate_batch(
     Returns:
         List of TranslatedUnit aligned with the input units list.
     """
-    user_msg = build_input_xml(units, start_index, profile=profile)
+    user_msg = build_input_xml(
+        units,
+        start_index,
+        profile=profile,
+        plural_tags=deps.plural_tags,
+    )
     seen: set[int] = set()
 
     async with agent.run_stream(
@@ -280,7 +289,7 @@ async def _translate_batch(
                 local_idx = t.index - start_index
                 if not (0 <= local_idx < len(units)):
                     continue
-                if not t.target:
+                if not t.targets:
                     continue
                 seen.add(t.index)
                 if on_progress:
@@ -294,7 +303,10 @@ async def _translate_batch(
         tu = by_index[start_index + i]
         # Reverse XML escaping applied by format_as_xml only when the source
         # had raw markup. Already-escaped source strings must remain escaped.
-        tu.target = _decode_serialized_markup(units[i].source, tu.target)
+        source = str(units[i].source)
+        tu.targets = [
+            _decode_serialized_markup(source, t) for t in tu.targets
+        ]
         results.append(tu)
     return results
 
@@ -317,6 +329,7 @@ async def _run_translation_async(
     temperature: float = 0.1,
     progress: Progress | None = None,
     profile: str = "full",
+    plural_tags: list[str] | None = None,
 ) -> None:
     """Shared batch loop driving the translator agent.
 
@@ -354,7 +367,8 @@ async def _run_translation_async(
         progress.update(task_id, completed=global_done)
         if verbose:
             src_short = src[:70] + ("…" if len(src) > 70 else "")
-            tgt_short = result.target[:60] + ("…" if len(result.target) > 60 else "")
+            display_target = result.targets[0] if result.targets else ""
+            tgt_short = display_target[:60] + ("…" if len(display_target) > 60 else "")
             flag = " [yellow][fuzzy][/]" if result.fuzzy else ""
             progress.console.print(
                 f"[cyan]{progress_label}[/] {src_short} → {tgt_short}{flag}"
@@ -400,6 +414,7 @@ async def _run_translation_async(
                     expected_indices=tuple(
                         range(next_start_index, next_start_index + len(batch))
                     ),
+                    plural_tags=plural_tags,
                 )
                 try:
                     results = await _translate_batch(
@@ -517,6 +532,7 @@ def _run_translation(
     temperature: float = 0.1,
     progress: Progress | None = None,
     profile: str = "full",
+    plural_tags: list[str] | None = None,
 ) -> None:
     asyncio.run(
         _run_translation_async(
@@ -536,6 +552,7 @@ def _run_translation(
             temperature=temperature,
             progress=progress,
             profile=profile,
+            plural_tags=plural_tags,
         )
     )
 
@@ -627,6 +644,12 @@ def translate_po(
 
     untranslated = _order_units(untranslated, order)
 
+    plural_tags = (
+        po_file.get_plural_tags()
+        if hasattr(po_file, "get_plural_tags")
+        else None
+    )
+
     _run_translation(
         store=po_file,
         units=untranslated,
@@ -644,6 +667,7 @@ def translate_po(
         temperature=temperature,
         progress=progress,
         profile=profile,
+        plural_tags=plural_tags,
     )
 
 

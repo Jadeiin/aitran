@@ -54,7 +54,13 @@ def _format_language_label(code: str) -> str:
     return f"{code} - {name}"
 
 
-def build_input_xml(units: list, start_index: int, *, profile: str = "full") -> str:
+def build_input_xml(
+    units: list,
+    start_index: int,
+    *,
+    profile: str = "full",
+    plural_tags: list[str] | None = None,
+) -> str:
     """Format translation units as XML for the LLM prompt.
 
     Only non-empty fields are included per unit.  Metadata is read through
@@ -67,13 +73,28 @@ def build_input_xml(units: list, start_index: int, *, profile: str = "full") -> 
         profile: ``"fast"`` includes only ``index`` + ``source``;
             ``"full"`` (default) adds ``context``, ``location``,
             ``note``, and ``flag``.
+        plural_tags: Plural form names for the target language
+            (e.g. ``["one", "other"]``). When provided, plural units
+            include ``sources`` and ``plural_tags`` elements.
 
     Returns:
         XML string with a root ``<translate-batch>`` element.
     """
     items: list[dict] = []
     for i, u in enumerate(units):
-        d: dict = {"index": start_index + i, "source": _safe_prompt_text(u.source)}
+        has_plural = getattr(u, "hasplural", lambda: False)()
+        if has_plural and plural_tags:
+            strings = (
+                u.source.strings
+                if hasattr(u.source, "strings")
+                else [u.source]
+            )
+            d: dict = {
+                "index": start_index + i,
+                "sources": [_safe_prompt_text(s) for s in strings],
+            }
+        else:
+            d = {"index": start_index + i, "source": _safe_prompt_text(u.source)}
 
         if profile == "fast":
             items.append(d)
@@ -116,7 +137,12 @@ class TranslatedUnit(BaseModel):
     """One translation result produced by the agent."""
 
     index: int = Field(description="Index matching the requested unit.")
-    target: str = Field(description="Translated text.")
+    targets: list[str] = Field(
+        description=(
+            "Translated text(s). Single-element list for singular units; "
+            "multi-element list for plural units matching plural_forms count."
+        ),
+    )
     fuzzy: bool = Field(
         default=False,
         description=(
@@ -151,6 +177,7 @@ class TranslationDeps:
     context: str
     dict_entries: list[tuple[str, str]]
     expected_indices: tuple[int, ...]
+    plural_tags: list[str] | None = None
 
 
 def build_model(
@@ -261,6 +288,13 @@ def build_translator_agent(model: Model) -> Agent[TranslationDeps, TranslationBa
             parts.append(
                 "Glossary (use these translations exactly when the source "
                 "string contains the key):\n" + "\n".join(lines)
+            )
+        if ctx.deps.plural_tags:
+            tags = ", ".join(ctx.deps.plural_tags)
+            parts.append(
+                f"Target language has {len(ctx.deps.plural_tags)} plural "
+                f"forms (in order): [{tags}]. "
+                f"For plural units, provide exactly this many targets."
             )
         return "\n\n".join(parts)
 

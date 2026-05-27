@@ -48,13 +48,14 @@ class FakeUnit:
         return self._note or ""
 
 
-def _make_deps(expected_indices=(1, 2)):
+def _make_deps(expected_indices=(1, 2), plural_tags=None):
     return TranslationDeps(
         source_lang="en",
         target_lang="zh_CN",
         context="",
         dict_entries=[],
         expected_indices=expected_indices,
+        plural_tags=plural_tags,
     )
 
 
@@ -119,8 +120,8 @@ async def test_translate_batch_success():
     model = TestModel(
         custom_output_args={
             "translations": [
-                {"index": 1, "target": "你好", "fuzzy": False, "note": None},
-                {"index": 2, "target": "世界", "fuzzy": False, "note": None},
+                {"index": 1, "targets": ["你好"], "fuzzy": False, "note": None},
+                {"index": 2, "targets": ["世界"], "fuzzy": False, "note": None},
             ],
         }
     )
@@ -136,15 +137,15 @@ async def test_translate_batch_success():
             on_progress=None,
         )
     assert len(results) == 2
-    assert results[0].target == "你好"
-    assert results[1].target == "世界"
+    assert results[0].targets[0] == "你好"
+    assert results[1].targets[0] == "世界"
 
 
 async def test_translate_batch_fuzzy_flag():
     model = TestModel(
         custom_output_args={
             "translations": [
-                {"index": 1, "target": "x", "fuzzy": True, "note": "unsure"},
+                {"index": 1, "targets": ["x"], "fuzzy": True, "note": "unsure"},
             ],
         }
     )
@@ -170,12 +171,12 @@ async def test_translate_batch_retries_on_missing_index():
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            yield ('{"translations":[{"index":1,"target":"ok","fuzzy":false}]}')
+            yield ('{"translations":[{"index":1,"targets":["ok"],"fuzzy":false}]}')
         else:
             yield (
                 '{"translations":['
-                '{"index":1,"target":"ok","fuzzy":false},'
-                '{"index":2,"target":"yes","fuzzy":false}'
+                '{"index":1,"targets":["ok"],"fuzzy":false},'
+                '{"index":2,"targets":["yes"],"fuzzy":false}'
                 "]}"
             )
 
@@ -202,7 +203,7 @@ async def test_message_history_accumulates():
     model = TestModel(
         custom_output_args={
             "translations": [
-                {"index": 1, "target": "你好", "fuzzy": False, "note": None},
+                {"index": 1, "targets": ["你好"], "fuzzy": False, "note": None},
             ],
         }
     )
@@ -224,7 +225,7 @@ async def test_message_history_accumulates():
         model2 = TestModel(
             custom_output_args={
                 "translations": [
-                    {"index": 2, "target": "世界", "fuzzy": False, "note": None},
+                    {"index": 2, "targets": ["世界"], "fuzzy": False, "note": None},
                 ],
             }
         )
@@ -254,7 +255,7 @@ def test_po_apply_batch_writes_fuzzy():
         pf,
         [u],
         [
-            TranslatedUnit(index=1, target="你好", fuzzy=True, note="check me"),
+            TranslatedUnit(index=1, targets=["你好"], fuzzy=True, note="check me"),
         ],
     )
     out = bytes(pf).decode()
@@ -272,7 +273,7 @@ def test_po_apply_batch_writes_clean():
         pf,
         [u],
         [
-            TranslatedUnit(index=1, target="你好", fuzzy=False),
+            TranslatedUnit(index=1, targets=["你好"], fuzzy=False),
         ],
     )
     out = bytes(pf).decode()
@@ -293,7 +294,7 @@ def test_po_apply_batch_no_note_no_comment():
         pf,
         [u],
         [
-            TranslatedUnit(index=1, target="你好", fuzzy=False),
+            TranslatedUnit(index=1, targets=["你好"], fuzzy=False),
         ],
     )
     out = bytes(pf).decode()
@@ -309,7 +310,7 @@ def test_po_apply_batch_syncs_plural_count_from_target_language():
         pf,
         [u],
         [
-            TranslatedUnit(index=1, target="file", fuzzy=False),
+            TranslatedUnit(index=1, targets=["file"], fuzzy=False),
         ],
     )
     out = bytes(pf).decode()
@@ -326,7 +327,7 @@ def test_po_apply_batch_uses_single_plural_form_for_chinese():
         pf,
         [u],
         [
-            TranslatedUnit(index=1, target="文件", fuzzy=False),
+            TranslatedUnit(index=1, targets=["文件"], fuzzy=False),
         ],
     )
     out = bytes(pf).decode()
@@ -615,7 +616,7 @@ def test_xliff_apply_batch_fuzzy_state():
         xf,
         [xu],
         [
-            TranslatedUnit(index=1, target="你好", fuzzy=True, note="ambiguous"),
+            TranslatedUnit(index=1, targets=["你好"], fuzzy=True, note="ambiguous"),
         ],
     )
     out = bytes(xf).decode()
@@ -632,7 +633,7 @@ def test_xliff_apply_batch_clean_state():
         xf,
         [xu],
         [
-            TranslatedUnit(index=1, target="你好", fuzzy=False),
+            TranslatedUnit(index=1, targets=["你好"], fuzzy=False),
         ],
     )
     out = bytes(xf).decode()
@@ -666,7 +667,7 @@ def test_build_model_openai_provider():
 def test_agent_instructions_inject_glossary():
     model = TestModel(
         custom_output_args={
-            "translations": [{"index": 1, "target": "ok", "fuzzy": False}],
+            "translations": [{"index": 1, "targets": ["ok"], "fuzzy": False}],
         }
     )
     deps = TranslationDeps(
@@ -699,7 +700,7 @@ def test_agent_instructions_inject_glossary():
 def test_agent_instructions_reject_ambiguous_language_code():
     model = TestModel(
         custom_output_args={
-            "translations": [{"index": 1, "target": "ok", "fuzzy": False}],
+            "translations": [{"index": 1, "targets": ["ok"], "fuzzy": False}],
         }
     )
     deps = TranslationDeps(
@@ -727,8 +728,8 @@ async def test_translate_batch_on_progress_callback():
     model = TestModel(
         custom_output_args={
             "translations": [
-                {"index": 1, "target": "你好", "fuzzy": False},
-                {"index": 2, "target": "世界", "fuzzy": False},
+                {"index": 1, "targets": ["你好"], "fuzzy": False},
+                {"index": 2, "targets": ["世界"], "fuzzy": False},
             ],
         }
     )
@@ -737,7 +738,7 @@ async def test_translate_batch_on_progress_callback():
     progress_items = []
 
     def track(src: str, result: TranslatedUnit):
-        progress_items.append((src, result.target, result.fuzzy))
+        progress_items.append((src, result.targets[0], result.fuzzy))
 
     with agent.override(model=model):
         results = await _translate_batch(
@@ -767,12 +768,12 @@ async def test_translate_batch_rejects_extra_indices():
         if call_count == 1:
             yield (
                 '{"translations":['
-                '{"index":1,"target":"ok","fuzzy":false},'
-                '{"index":99,"target":"bogus","fuzzy":false}'
+                '{"index":1,"targets":["ok"],"fuzzy":false},'
+                '{"index":99,"targets":["bogus"],"fuzzy":false}'
                 "]}"
             )
         else:
-            yield ('{"translations":[{"index":1,"target":"ok","fuzzy":false}]}')
+            yield ('{"translations":[{"index":1,"targets":["ok"],"fuzzy":false}]}')
 
     fn_model = FunctionModel(stream_function=stream_fn)
     agent = build_translator_agent(fn_model)
@@ -800,7 +801,7 @@ async def test_translate_batch_unescapes_html_entities():
             "translations": [
                 {
                     "index": 1,
-                    "target": "点击 &lt;code&gt;btn&lt;/code&gt;",
+                    "targets": ["点击 &lt;code&gt;btn&lt;/code&gt;"],
                     "fuzzy": False,
                 },
             ],
@@ -817,7 +818,7 @@ async def test_translate_batch_unescapes_html_entities():
             [],
             on_progress=None,
         )
-    assert results[0].target == "点击 <code>btn</code>"
+    assert results[0].targets[0] == "点击 <code>btn</code>"
 
 
 async def test_translate_batch_unescapes_mixed_markup_entities():
@@ -832,7 +833,7 @@ async def test_translate_batch_unescapes_mixed_markup_entities():
             "translations": [
                 {
                     "index": 1,
-                    "target": encoded,
+                    "targets": [encoded],
                     "fuzzy": False,
                 },
             ],
@@ -854,7 +855,7 @@ async def test_translate_batch_unescapes_mixed_markup_entities():
             [],
             on_progress=None,
         )
-    assert results[0].target == (
+    assert results[0].targets[0] == (
         'Open <a href="/docs?a=1&amp;b=2">docs</a>, '
         "see <strong>bold</strong>, <code>x & y</code> <br/>"
     )
@@ -867,7 +868,7 @@ async def test_translate_batch_preserves_non_xml_text_entities():
             "translations": [
                 {
                     "index": 1,
-                    "target": "版权 &copy; &amp; Co &quot;quoted&quot;",
+                    "targets": ["版权 &copy; &amp; Co &quot;quoted&quot;"],
                     "fuzzy": False,
                 },
             ],
@@ -884,7 +885,7 @@ async def test_translate_batch_preserves_non_xml_text_entities():
             [],
             on_progress=None,
         )
-    assert results[0].target == "版权 &copy; & Co &quot;quoted&quot;"
+    assert results[0].targets[0] == "版权 &copy; & Co &quot;quoted&quot;"
 
 
 async def test_translate_batch_unescapes_plain_ampersands():
@@ -894,7 +895,7 @@ async def test_translate_batch_unescapes_plain_ampersands():
             "translations": [
                 {
                     "index": 1,
-                    "target": "AT&amp;T 和 Rock &amp; Roll",
+                    "targets": ["AT&amp;T 和 Rock &amp; Roll"],
                     "fuzzy": False,
                 },
             ],
@@ -911,7 +912,7 @@ async def test_translate_batch_unescapes_plain_ampersands():
             [],
             on_progress=None,
         )
-    assert results[0].target == "AT&T 和 Rock & Roll"
+    assert results[0].targets[0] == "AT&T 和 Rock & Roll"
 
 
 async def test_translate_batch_unescapes_numeric_placeholder_tags():
@@ -921,7 +922,7 @@ async def test_translate_batch_unescapes_numeric_placeholder_tags():
             "translations": [
                 {
                     "index": 1,
-                    "target": "&lt;0&gt;链接&lt;/0&gt;",
+                    "targets": ["&lt;0&gt;链接&lt;/0&gt;"],
                     "fuzzy": False,
                 },
             ],
@@ -938,7 +939,7 @@ async def test_translate_batch_unescapes_numeric_placeholder_tags():
             [],
             on_progress=None,
         )
-    assert results[0].target == "<0>链接</0>"
+    assert results[0].targets[0] == "<0>链接</0>"
 
 
 async def test_translate_batch_preserves_source_escaped_strings():
@@ -948,7 +949,7 @@ async def test_translate_batch_preserves_source_escaped_strings():
             "translations": [
                 {
                     "index": 1,
-                    "target": "显示 &lt;code&gt;btn&lt;/code&gt;",
+                    "targets": ["显示 &lt;code&gt;btn&lt;/code&gt;"],
                     "fuzzy": False,
                 },
             ],
@@ -965,7 +966,7 @@ async def test_translate_batch_preserves_source_escaped_strings():
             [],
             on_progress=None,
         )
-    assert results[0].target == "显示 &lt;code&gt;btn&lt;/code&gt;"
+    assert results[0].targets[0] == "显示 &lt;code&gt;btn&lt;/code&gt;"
 
 
 def test_translate_po_dir_runs_files_in_parallel(monkeypatch, tmp_path):
@@ -1046,3 +1047,116 @@ def test_translate_xliff_dir_runs_files_in_parallel(monkeypatch, tmp_path):
 
     assert len(calls) == 3
     assert max_active == 2
+
+
+# ── Plural form support ────────────────────────────────────────────
+
+
+@dataclass
+class FakePluralUnit:
+    source: multistring
+    context: str | None = None
+    _note: str | None = None
+
+    def hasplural(self) -> bool:
+        return len(self.source.strings) > 1
+
+    def getcontext(self) -> str:
+        return self.context or ""
+
+    def getnotes(self) -> str:
+        return self._note or ""
+
+
+def test_build_input_xml_plural_units():
+    """Plural units should include sources and plural_tags."""
+    units = [
+        FakePluralUnit(
+            source=multistring([
+                "{0} result",
+                "{0} results",
+            ])
+        ),
+    ]
+    xml = build_input_xml(units, start_index=1, plural_tags=["one", "other"])
+    assert "{0} result" in xml
+    assert "{0} results" in xml
+    assert "<sources>" in xml
+    assert "plural_tags" not in xml
+
+
+def test_build_input_xml_singular_no_plural_tags():
+    """Singular units should not include plural_tags."""
+    units = [FakeUnit("Hello")]
+    xml = build_input_xml(units, start_index=1, plural_tags=["one", "other"])
+    assert "<source>Hello</source>" in xml
+    assert "plural_tags" not in xml
+    assert "sources" not in xml
+
+
+async def test_translate_batch_handles_plural_targets():
+    """Agent returning targets list for plural units should work."""
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "targets": ["{0} 个结果", "{0} 个结果"],
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [
+        FakePluralUnit(
+            source=multistring(["{0} result", "{0} results"])
+        ),
+    ]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,), plural_tags=["one", "other"]),
+            [],
+            on_progress=None,
+        )
+    assert results[0].targets == ["{0} 个结果", "{0} 个结果"]
+
+
+async def test_translate_batch_plural_targets_entity_decode():
+    """XML entities in plural targets should be decoded."""
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "targets": [
+                        "&lt;code&gt; 链接",
+                        "&lt;code&gt; 链接",
+                    ],
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [
+        FakePluralUnit(
+            source=multistring([
+                "<code> link",
+                "<code> links",
+            ])
+        ),
+    ]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,), plural_tags=["one", "other"]),
+            [],
+            on_progress=None,
+        )
+    assert results[0].targets == ["<code> 链接", "<code> 链接"]

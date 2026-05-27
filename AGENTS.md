@@ -31,7 +31,7 @@ format.
 
 Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (Click group).
 
-- `cli.py` — Click CLI with `translate` (default command), `sync`, `remove`, `userdict` subcommands
+- `cli.py` — Click CLI with `translate` (default command), `sync`, `remove`, `userdict`, `crowdin`, `weblate` subcommands
 - `agent.py` — pydantic-ai agent definition, model routing (`build_model`), structured output types (`TranslatedUnit` / `TranslationBatch`), output validation
 - `translate.py` — batch translation loop with streaming via `rich` progress bars; `PoTranslator` and `XliffTranslator` adapter classes handle format-specific parse/filter/apply/save
 - `prompts/__init__.py` — inline system + user prompt strings (not external files)
@@ -39,6 +39,8 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 - `manipulate.py` — PO entry removal by filter (fuzzy, obsolete, regex reference match)
 - `sync.py` — update PO from POT preserving existing translations
 - `utils.py` — config discovery, language code normalization, OS file-open helpers
+- `crowdin.py` — Crowdin API client: list projects/files/languages, progress, download/upload translations (XLIFF only)
+- `weblate.py` — Weblate API client (`wlc`): list objects, stats, download/upload translations (PO/XLIFF)
 
 ### Data flow
 
@@ -64,7 +66,7 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 - **User dictionaries**: Looked up in order: `$CWD/.aitran/` → git root `.aitran/` → XDG user config dir (`platformdirs`). Named `dictionary-<lang>.json`.
 - **Commitizen**: Conventional commits with `tag_format = "v$version"`, `major_version_zero = true`.
 - **Output validation**: Agent validates index completeness via `@agent.output_validator` — missing/extra indices trigger `ModelRetry` (up to 3 retries).
-- **HTML/XML escaping**: `format_as_xml` escapes `<>&` in source; `_translate_batch` calls translate-toolkit `quote.htmlentitydecode()` on targets to reverse this. Prompt strings and saved targets should pass through translate-toolkit XML/text helpers where applicable.
+- **HTML/XML escaping**: `format_as_xml` escapes `<>&` in source text when building the prompt XML. `_decode_serialized_markup()` in `translate.py` conditionally reverses this by decoding only entities (`&amp;`, `&lt;`, `&gt;`) whose corresponding characters appeared in the original source. The prompt also explicitly instructs the LLM not to escape output. Both layers exist because LLMs are unreliable at following XML-escaping instructions.
 - **XLIFF mutation**: Do not edit XLIFF XML nodes manually when applying translations. Use `xliffunit.settarget()`, `marktranslated()`, `markreviewneeded()`, and note APIs so translate-toolkit owns node creation, XML-safe text, and state mapping.
 - **Rate limiting**: HTTP 429 triggers a 20-second sleep before retry. Timeouts (408/504) retry immediately.
 
