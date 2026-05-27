@@ -379,12 +379,7 @@ async def _run_translation_async(
     progress: Progress | None = None,
     profile: str = "full",
 ) -> None:
-    """Shared batch loop driving the translator agent.
-
-    Raises:
-        ModelHTTPError: On fatal HTTP errors (401, 403, 400) or when
-            retry limits for rate-limit / server errors are exhausted.
-    """
+    """Shared batch loop driving the translator agent."""
     context = _read_context(context_file)
     sources = [u.source for u in units]
     dict_entries = find_matching_entries(sources, target_lang)
@@ -443,136 +438,129 @@ async def _run_translation_async(
     server_error_retries = 0
     MAX_SERVER_ERROR_RETRIES = 3
 
+    async def _flush_batch() -> None:
+        """Flush current batch with retry logic for transient errors.
+
+        Raises:
+            ModelHTTPError: On fatal HTTP errors (401, 403, 400) or when
+                retry limits for rate-limit / server errors are exhausted.
+        """
+        nonlocal batch_retries, rate_limit_retries, server_error_retries
+        nonlocal next_start_index, batch
+        while True:
+            deps = TranslationDeps(
+                source_lang=source_lang,
+                target_lang=target_lang,
+                context=context,
+                dict_entries=dict_entries,
+                expected_indices=tuple(
+                    range(next_start_index, next_start_index + len(batch))
+                ),
+            )
+            try:
+                results = await _translate_batch(
+                    agent,
+                    batch,
+                    next_start_index,
+                    deps,
+                    history,
+                    on_unit_done,
+                    profile=profile,
+                )
+                translator.apply_batch(store, batch, results)
+                translator.save(store, output_path)
+                _commit_batch()
+                next_start_index += len(batch)
+                batch = []
+                batch_retries = 0
+                rate_limit_retries = 0
+                server_error_retries = 0
+                return
+            except ModelHTTPError as e:
+                if e.status_code in (401, 403):
+                    console.print(
+                        f"\n[red]Authentication error {e.status_code}. "
+                        f"Check your API key.[/]"
+                    )
+                    raise
+                if e.status_code == 400:
+                    body_detail = f": {e.body}" if e.body else ""
+                    console.print(f"\n[red]Bad request (400){body_detail}[/]")
+                    raise
+                if _is_rate_limit(e):
+                    rate_limit_retries += 1
+                    if rate_limit_retries > MAX_RATE_LIMIT_RETRIES:
+                        console.print(
+                            f"\n[red]Rate limited "
+                            f"{MAX_RATE_LIMIT_RETRIES} times. "
+                            f"Aborting.[/]"
+                        )
+                        raise
+                    wait = (2**rate_limit_retries) + random.uniform(0, 2)
+                    console.print(
+                        f"\n[yellow]Rate limited. Waiting {wait:.1f}s "
+                        f"(attempt {rate_limit_retries}/"
+                        f"{MAX_RATE_LIMIT_RETRIES})...[/]"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                if _is_timeout(e) or e.status_code >= 500:
+                    server_error_retries += 1
+                    if server_error_retries > MAX_SERVER_ERROR_RETRIES:
+                        console.print(
+                            f"\n[red]Server error persists after "
+                            f"{MAX_SERVER_ERROR_RETRIES} retries. "
+                            f"Aborting.[/]"
+                        )
+                        raise
+                    wait = (2**server_error_retries) + random.uniform(0, 1)
+                    label = (
+                        "Timeout"
+                        if _is_timeout(e)
+                        else f"Server error {e.status_code}"
+                    )
+                    console.print(
+                        f"\n[yellow]{label}. Retrying in {wait:.1f}s "
+                        f"(attempt {server_error_retries}/"
+                        f"{MAX_SERVER_ERROR_RETRIES})...[/]"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                # Unknown HTTP errors (3xx, other 4xx) → fail fast
+                console.print(f"\n[red]HTTP error {e.status_code}: {e}[/]")
+                raise
+            except UnexpectedModelBehavior as e:
+                batch_retries += 1
+                cause = e.__cause__
+                cause_msg = f": {cause}" if cause is not None else ""
+                if batch_retries < BATCH_MAX_RETRIES:
+                    _rollback_batch()
+                    console.print(
+                        f"\n[yellow]Output validation failed{cause_msg}. "
+                        f"Retrying batch "
+                        f"({batch_retries}/{BATCH_MAX_RETRIES})...[/]"
+                    )
+                    continue
+                console.print(
+                    f"\n[red]Output validation failed after "
+                    f"{BATCH_MAX_RETRIES} retries{cause_msg}. "
+                    f"Skipping {len(batch)} unit(s).[/]"
+                )
+                _commit_batch()
+                next_start_index += len(batch)
+                batch = []
+                batch_retries = 0
+                return
+
     with progress if owns_progress else nullcontext():
         for unit in units:
             if len(batch) >= batch_size:
-                deps = TranslationDeps(
-                    source_lang=source_lang,
-                    target_lang=target_lang,
-                    context=context,
-                    dict_entries=dict_entries,
-                    expected_indices=tuple(
-                        range(next_start_index, next_start_index + len(batch))
-                    ),
-                )
-                try:
-                    results = await _translate_batch(
-                        agent,
-                        batch,
-                        next_start_index,
-                        deps,
-                        history,
-                        on_unit_done,
-                        profile=profile,
-                    )
-                    translator.apply_batch(store, batch, results)
-                    translator.save(store, output_path)
-                    _commit_batch()
-                    next_start_index += len(batch)
-                    batch = []
-                    batch_retries = 0
-                    rate_limit_retries = 0
-                    server_error_retries = 0
-                except ModelHTTPError as e:
-                    if e.status_code in (401, 403):
-                        console.print(
-                            f"\n[red]Authentication error {e.status_code}. "
-                            f"Check your API key.[/]"
-                        )
-                        raise
-                    if e.status_code == 400:
-                        body_detail = f": {e.body}" if e.body else ""
-                        console.print(f"\n[red]Bad request (400){body_detail}[/]")
-                        raise
-                    if _is_rate_limit(e):
-                        rate_limit_retries += 1
-                        if rate_limit_retries > MAX_RATE_LIMIT_RETRIES:
-                            console.print(
-                                f"\n[red]Rate limited "
-                                f"{MAX_RATE_LIMIT_RETRIES} times. "
-                                f"Aborting.[/]"
-                            )
-                            raise
-                        wait = (2**rate_limit_retries) + random.uniform(0, 2)
-                        console.print(
-                            f"\n[yellow]Rate limited. Waiting {wait:.1f}s "
-                            f"(attempt {rate_limit_retries}/"
-                            f"{MAX_RATE_LIMIT_RETRIES})...[/]"
-                        )
-                        await asyncio.sleep(wait)
-                        continue
-                    if _is_timeout(e) or e.status_code >= 500:
-                        server_error_retries += 1
-                        if server_error_retries > MAX_SERVER_ERROR_RETRIES:
-                            console.print(
-                                f"\n[red]Server error persists after "
-                                f"{MAX_SERVER_ERROR_RETRIES} retries. "
-                                f"Aborting.[/]"
-                            )
-                            raise
-                        wait = (2**server_error_retries) + random.uniform(0, 1)
-                        label = (
-                            "Timeout"
-                            if _is_timeout(e)
-                            else f"Server error {e.status_code}"
-                        )
-                        console.print(
-                            f"\n[yellow]{label}. Retrying in {wait:.1f}s "
-                            f"(attempt {server_error_retries}/"
-                            f"{MAX_SERVER_ERROR_RETRIES})...[/]"
-                        )
-                        await asyncio.sleep(wait)
-                        continue
-                    # Unknown HTTP errors (3xx, other 4xx) → fail fast
-                    console.print(f"\n[red]HTTP error {e.status_code}: {e}[/]")
-                    raise
-                except UnexpectedModelBehavior as e:
-                    batch_retries += 1
-                    cause = e.__cause__
-                    cause_msg = f": {cause}" if cause is not None else ""
-                    if batch_retries < BATCH_MAX_RETRIES:
-                        _rollback_batch()
-                        console.print(
-                            f"\n[yellow]Output validation failed{cause_msg}. "
-                            f"Retrying batch "
-                            f"({batch_retries}/{BATCH_MAX_RETRIES})...[/]"
-                        )
-                        continue
-                    console.print(
-                        f"\n[red]Output validation failed after "
-                        f"{BATCH_MAX_RETRIES} retries{cause_msg}. "
-                        f"Skipping {len(batch)} unit(s).[/]"
-                    )
-                    _commit_batch()
-                    next_start_index += len(batch)
-                    batch = []
-                    batch_retries = 0
-
+                await _flush_batch()
             batch.append(unit)
 
     # Flush remaining units
     if batch:
-        deps = TranslationDeps(
-            source_lang=source_lang,
-            target_lang=target_lang,
-            context=context,
-            dict_entries=dict_entries,
-            expected_indices=tuple(
-                range(next_start_index, next_start_index + len(batch))
-            ),
-        )
-        results = await _translate_batch(
-            agent,
-            batch,
-            next_start_index,
-            deps,
-            history,
-            on_unit_done,
-            profile=profile,
-        )
-        translator.apply_batch(store, batch, results)
-        translator.save(store, output_path)
-        _commit_batch()
+        await _flush_batch()
 
 
 def _run_translation(
