@@ -44,7 +44,7 @@ Translation guidelines are as follows:
 
 4. **Output Format**:
    - For each `<translate>` element you receive, produce exactly one `TranslatedUnit` with a matching `index`.
-   - `targets` is a list of translated strings. For singular units: one element. For plural units (have `<sources>` and `<plural_tags>`): exactly the number of forms matching `<plural_tags>`. Each index corresponds to the tag at the same position (e.g. index 0 = first tag like "zero" or "one").
+   - `targets` is a list of translated strings. For singular units: one element. For plural units (have `<sources>`): one element per plural form as described in the task instructions.
    - Return the final text exactly as it should be saved. Do not XML-escape characters — write `"` not `&quot;`, `<` not `&lt;`, `>` not `&gt;`, `&` not `&amp;`. Only preserve XML entities that were literal in the source.
    - `fuzzy` (default false): set to `true` when you are not confident — the source is ambiguous, placeholders are unclear, context is insufficient, or the string seems untranslatable. A reviewer will be alerted.
    - `note` (optional): leave a short translator-style remark only when it would help a human reviewer — alternative renderings, ambiguities, or context to verify. Keep notes brief; do not narrate routine translations.
