@@ -62,7 +62,7 @@ Translation guidelines are as follows:
 
 4. **Output Format**:
    - For each `<translate>` element you receive, produce exactly one `TranslatedUnit` with a matching `index`.
-   - `target` holds your translation. Return the final text exactly as it should be saved. Do not XML-escape characters in `target` — write `"` not `&quot;`, `<` not `&lt;`, `>` not `&gt;`, `&` not `&amp;`. Only preserve XML entities that were literal in the source (e.g. if the source contains the literal string `&lt;code&gt;`, keep it as `&lt;code&gt;`).
+   - `targets` holds your translation(s) as a list. Single-element list for singular units; multi-element list for plural units matching the number of plural forms. Return the final text exactly as it should be saved. Do not XML-escape characters — write `"` not `&quot;`, `<` not `&lt;`, `>` not `&gt;`, `&` not `&amp;`. Only preserve XML entities that were literal in the source (e.g. if the source contains the literal string `&lt;code&gt;`, keep it as `&lt;code&gt;`).
    - `fuzzy` (default false): set to `true` when you are not confident — the source is ambiguous, placeholders are unclear, context is insufficient, or the string seems untranslatable. A reviewer will be alerted.
    - `note` (optional): leave a short translator-style remark only when it would help a human reviewer — alternative renderings, ambiguities, or context to verify. Keep notes brief; do not narrate routine translations.
 
@@ -80,7 +80,12 @@ class TranslatedUnit(BaseModel):
     """One translation result produced by the agent."""
 
     index: int = Field(description="Index matching the requested unit.")
-    target: str = Field(description="Translated text.")
+    targets: list[str] = Field(
+        description=(
+            "Translated text(s). Single-element list for singular units; "
+            "multi-element list for plural units matching plural_forms count."
+        ),
+    )
     fuzzy: bool = Field(
         default=False,
         description=(
@@ -115,6 +120,7 @@ class TranslationDeps:
     context: str
     dict_entries: list[tuple[str, str]]
     expected_indices: tuple[int, ...]
+    plural_tags: list[str] | None = None
 
 
 def build_translator_agent(model: Model) -> Agent[TranslationDeps, TranslationBatch]:
@@ -152,6 +158,13 @@ def build_translator_agent(model: Model) -> Agent[TranslationDeps, TranslationBa
             parts.append(
                 "Glossary (use these translations exactly when the source "
                 "string contains the key):\n" + "\n".join(lines)
+            )
+        if ctx.deps.plural_tags:
+            tags = ", ".join(ctx.deps.plural_tags)
+            parts.append(
+                f"Target language has {len(ctx.deps.plural_tags)} plural "
+                f"forms (in order): [{tags}]. "
+                f"For plural units, provide exactly this many targets."
             )
         return "\n\n".join(parts)
 

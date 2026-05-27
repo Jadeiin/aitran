@@ -120,7 +120,13 @@ def build_model(
     )
 
 
-def build_input_xml(units: list, start_index: int, *, profile: str = "full") -> str:
+def build_input_xml(
+    units: list,
+    start_index: int,
+    *,
+    profile: str = "full",
+    plural_tags: list[str] | None = None,
+) -> str:
     """Format translation units as XML for the LLM prompt.
 
     Only non-empty fields are included per unit.  Metadata is read through
@@ -133,13 +139,28 @@ def build_input_xml(units: list, start_index: int, *, profile: str = "full") -> 
         profile: ``"fast"`` includes only ``index`` + ``source``;
             ``"full"`` (default) adds ``context``, ``location``,
             ``note``, and ``flag``.
+        plural_tags: Plural form names for the target language
+            (e.g. ``["one", "other"]``). When provided, plural units
+            include ``sources`` and ``plural_tags`` elements.
 
     Returns:
         XML string with a root ``<translate-batch>`` element.
     """
     items: list[dict] = []
     for i, u in enumerate(units):
-        d: dict = {"index": start_index + i, "source": safe_prompt_text(u.source)}
+        has_plural = getattr(u, "hasplural", lambda: False)()
+        if has_plural and plural_tags:
+            strings = (
+                u.source.strings
+                if hasattr(u.source, "strings")
+                else [u.source]
+            )
+            d: dict = {
+                "index": start_index + i,
+                "sources": [safe_prompt_text(s) for s in strings],
+            }
+        else:
+            d = {"index": start_index + i, "source": safe_prompt_text(u.source)}
 
         if profile == "fast":
             items.append(d)

@@ -31,15 +31,18 @@ format.
 
 Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (Click group).
 
-- `cli.py` — Click CLI with `translate` (default command), `sync`, `remove`, `userdict` subcommands
+- `cli.py` — Click CLI with `translate` (default command), `sync`, `remove`, `userdict`, `crowdin`, `weblate` subcommands
 - `agents/` — pydantic-ai agent definitions:
   - `_base.py` — model routing (`build_model`), XML prompt builder (`build_input_xml`), shared helpers
   - `translator.py` — translator agent (`build_translator_agent`), output types (`TranslatedUnit` / `TranslationBatch`), prompts
+  - `reviewer.py` — reviewer agent (`build_reviewer_agent`), output types (`ReviewedUnit` / `ReviewBatch`)
 - `translate.py` — batch translation loop with streaming via `rich` progress bars; `PoTranslator` and `XliffTranslator` adapter classes handle format-specific parse/filter/apply/save
 - `dicts.py` — glossary lookup with cascading config discovery (CWD → git root → XDG dir)
 - `manipulate.py` — PO entry removal by filter (fuzzy, obsolete, regex reference match)
 - `sync.py` — update PO from POT preserving existing translations
 - `utils.py` — config discovery, language code normalization, OS file-open helpers
+- `crowdin.py` — Crowdin API client: list projects/files/languages, progress, download/upload translations (XLIFF only)
+- `weblate.py` — Weblate API client (`wlc`): list objects, stats, download/upload translations (PO/XLIFF)
 
 ### Data flow
 
@@ -65,7 +68,8 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 - **User dictionaries**: Looked up in order: `$CWD/.aitran/` → git root `.aitran/` → XDG user config dir (`platformdirs`). Named `dictionary-<lang>.json`.
 - **Commitizen**: Conventional commits with `tag_format = "v$version"`, `major_version_zero = true`.
 - **Output validation**: Agent validates index completeness via `@agent.output_validator` — missing/extra indices trigger `ModelRetry` (up to 3 retries).
-- **HTML/XML escaping**: `format_as_xml` escapes `<>&` in source; `_translate_batch` calls translate-toolkit `quote.htmlentitydecode()` on targets to reverse this. Prompt strings and saved targets should pass through translate-toolkit XML/text helpers where applicable.
+- **Plural handling**: `TranslatedUnit.targets` is always a list — length 1 for singular, length matching `plural_tags` for plural units. PO plural sources are passed via `sources` list in prompt XML; `plural_tags` (e.g. `["one", "other"]`) is injected via task instructions.
+- **HTML/XML escaping**: `format_as_xml` escapes `<>&` in source text when building the prompt XML. `_decode_serialized_markup()` in `translate.py` conditionally reverses this by decoding only entities (`&amp;`, `&lt;`, `&gt;`) whose corresponding characters appeared in the original source. The prompt also explicitly instructs the LLM not to escape output. Both layers exist because LLMs are unreliable at following XML-escaping instructions.
 - **XLIFF mutation**: Do not edit XLIFF XML nodes manually when applying translations. Use `xliffunit.settarget()`, `marktranslated()`, `markreviewneeded()`, and note APIs so translate-toolkit owns node creation, XML-safe text, and state mapping.
 - **Rate limiting**: HTTP 429 triggers a 20-second sleep before retry. Timeouts (408/504) retry immediately.
 
