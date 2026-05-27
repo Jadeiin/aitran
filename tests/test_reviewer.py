@@ -11,11 +11,6 @@ from aitran.agents.reviewer import (
 
 
 class TestReviewedUnit:
-    def test_pass_verdict(self):
-        unit = ReviewedUnit(index=1, verdict="pass")
-        assert unit.corrected is None
-        assert unit.note is None
-
     def test_revise_with_correction(self):
         unit = ReviewedUnit(
             index=1,
@@ -36,14 +31,13 @@ class TestReviewBatch:
     def test_batch_roundtrip(self):
         batch = ReviewBatch(
             units=[
-                ReviewedUnit(index=1, verdict="pass"),
                 ReviewedUnit(index=2, verdict="revise", corrected="fixed"),
                 ReviewedUnit(index=3, verdict="reject"),
             ]
         )
-        assert len(batch.units) == 3
-        assert batch.units[0].verdict == "pass"
-        assert batch.units[1].corrected == "fixed"
+        assert len(batch.units) == 2
+        assert batch.units[0].verdict == "revise"
+        assert batch.units[0].corrected == "fixed"
 
 
 class TestBuildReviewerAgent:
@@ -56,7 +50,6 @@ class TestBuildReviewerAgent:
         model = TestModel(
             custom_output_args={
                 "units": [
-                    {"index": 1, "verdict": "pass"},
                     {"index": 2, "verdict": "revise", "corrected": "fix"},
                     {"index": 3, "verdict": "reject", "note": "bad"},
                 ]
@@ -70,6 +63,6 @@ class TestBuildReviewerAgent:
             expected_indices=(1, 2, 3),
         )
         result = agent.run_sync("review these", deps=deps)
-        assert len(result.output.units) == 3
-        assert result.output.units[0].verdict == "pass"
-        assert result.output.units[1].corrected == "fix"
+        assert len(result.output.units) == 2
+        assert result.output.units[0].verdict == "revise"
+        assert result.output.units[0].corrected == "fix"

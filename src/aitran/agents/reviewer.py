@@ -21,19 +21,21 @@ if TYPE_CHECKING:
 SYSTEM_PROMPT = (
     "You are a translation quality reviewer. You will evaluate existing "
     "translations against their source text and any QA rule violations "
-    "detected by automated checkers. Your goal is to confirm real problems, "
-    "dismiss false positives, and provide corrections when possible."
+    "detected by automated checkers. Your goal is to identify real problems "
+    "and provide corrections when possible."
 )
 
 USER_PROMPT = """\
 Review guidelines:
 
-1. **Verdict** — For each unit, assign exactly one of:
-   - `pass` — The translation is correct and natural.
+1. **Verdict** — For each problematic unit, assign exactly one of:
    - `revise` — Minor issue found; provide a `corrected` target.
    - `reject` — Serious issue found. If you can fix it, provide `corrected`;
      if the problem requires human retranslation (e.g. the meaning is
      fundamentally wrong), leave `corrected` as null.
+
+   **Only return units with problems.** If a translation is correct and
+   natural, simply omit it from the output — it is implicitly accepted.
 
 2. **Evaluating QA errors** — Automated checkers report violations with
    severity levels (critical / functional / cosmetic / extraction). Treat
@@ -41,7 +43,7 @@ Review guidelines:
    - Critical errors (printf, xmltags, escapes) are almost always real.
    - Cosmetic errors (brackets, endpunc, caps) may be intentional style
      choices in the target language — use your judgment.
-   - If a QA error is a false positive, still mark `pass` for that unit.
+   - If a QA error is a false positive, omit that unit from the output.
 
 3. **Beyond QA errors** — Also check for:
    - Meaning accuracy: does the target convey the source intent?
@@ -49,12 +51,12 @@ Review guidelines:
    - Consistency: are similar terms translated consistently?
    - Cultural appropriateness: any offensive or awkward phrasing?
 
-4. **Notes** — Use the `note` field to explain your reasoning when the
-   verdict is not `pass`. Keep notes brief and actionable. Do not narrate
-   routine passes.
+4. **Notes** — Use the `note` field to explain your reasoning. Keep notes
+   brief and actionable.
 
-5. **Output format** — Return exactly one `ReviewedUnit` per requested
-   index. Do not invent extra indices and do not omit any.
+5. **Output format** — Only include units that need revision or rejection.
+   Do not invent indices that were not requested. The output list may be
+   empty if all translations are acceptable.
 
 Do not answer questions or explain concepts. Review only."""
 
@@ -70,8 +72,8 @@ class ReviewedUnit(BaseModel):
     index: int = Field(description="Index matching the requested unit.")
     verdict: str = Field(
         description=(
-            "Review verdict: 'pass' (OK), 'revise' (minor issue, has "
-            "correction), or 'reject' (serious issue)."
+            "Review verdict: 'revise' (minor issue, has correction) "
+            "or 'reject' (serious issue)."
         ),
     )
     corrected: str | None = Field(
@@ -150,23 +152,14 @@ def build_reviewer_agent(model: Model) -> Agent[ReviewDeps, ReviewBatch]:
     ) -> ReviewBatch:
         if ctx.partial_output:
             return output
-        got = {u.index for u in output.units}
-        expected = set(ctx.deps.expected_indices)
-        missing = expected - got
-        extra = got - expected
-        if missing or extra:
-            msg_parts = []
-            if missing:
-                msg_parts.append(f"missing indices {sorted(missing)}")
-            if extra:
-                msg_parts.append(f"unexpected indices {sorted(extra)}")
+        valid_indices = set(ctx.deps.expected_indices)
+        extra = {u.index for u in output.units} - valid_indices
+        if extra:
             raise ModelRetry(
-                "Review set incomplete: "
-                + "; ".join(msg_parts)
-                + ". Return exactly one entry per requested index."
+                f"Unexpected indices {sorted(extra)}. "
+                f"Only return units from the requested set."
             )
-        # Validate verdict values
-        valid_verdicts = {"pass", "revise", "reject"}
+        valid_verdicts = {"revise", "reject"}
         for u in output.units:
             if u.verdict not in valid_verdicts:
                 raise ModelRetry(

@@ -176,8 +176,6 @@ class PoTranslator:
         and clears the fuzzy marker.
         """
         for unit, result in zip(units, results, strict=True):
-            if result.verdict == "pass":
-                continue
             if auto_fix and result.corrected is not None:
                 unit.target = xml_helpers.valid_chars_only(result.corrected)
                 unit.markfuzzy(False)
@@ -280,8 +278,6 @@ class XliffTranslator:
         target and marks translated.
         """
         for unit, result in zip(units, results, strict=True):
-            if result.verdict == "pass":
-                continue
             if auto_fix and result.corrected is not None:
                 unit.settarget(xml_helpers.valid_chars_only(result.corrected))
                 unit.marktranslated()

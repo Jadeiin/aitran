@@ -11,14 +11,6 @@ def _po(content: str) -> po.pofile:
 
 
 class TestPoReviewApply:
-    def test_pass_does_not_modify_unit(self):
-        pofile = _po('#: src/a.py:1\nmsgid "Hello"\nmsgstr "你好"\n')
-        unit = pofile.units[0]
-        results = [ReviewedUnit(index=1, verdict="pass")]
-        PoTranslator.apply_review_batch([unit], results)
-        assert unit.target == "你好"
-        assert not unit.isfuzzy()
-
     def test_revise_marks_fuzzy_with_note(self):
         pofile = _po('#: src/a.py:1\nmsgid "Hello %s"\nmsgstr "你好"\n')
         unit = pofile.units[0]
@@ -113,12 +105,12 @@ class TestPoReviewApply:
             '#: src/a.py:3\nmsgid "Error"\nmsgstr "错误"\n'
         )
         units = [u for u in pofile.units if u.source]
+        # Only revise/reject results; unit 1 is implicitly OK (not in results)
         results = [
-            ReviewedUnit(index=1, verdict="pass"),
             ReviewedUnit(index=2, verdict="revise", corrected="修正", note="fix"),
             ReviewedUnit(index=3, verdict="reject", note="wrong"),
         ]
-        PoTranslator.apply_review_batch(units, results)
+        PoTranslator.apply_review_batch(units[1:], results)
         assert not units[0].isfuzzy()
         assert units[1].isfuzzy()
         assert units[2].isfuzzy()
