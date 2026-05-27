@@ -357,7 +357,11 @@ def translate(
         flush_logfire(enabled=logfire_enabled)
 
 
-@app.command("review", context_settings=CONTEXT_SETTINGS)
+@app.command(
+    "review",
+    context_settings=CONTEXT_SETTINGS,
+    help="Review translated PO/XLIFF files using QA + LLM.",
+)
 @click.option(
     "-m",
     "--model",
