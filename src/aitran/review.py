@@ -145,23 +145,23 @@ async def _run_review_async(
     char_count = 0
     next_start_index = 1
     history: list = []
+    qa_runner = QARunner(target_lang=target_lang)
 
     async def _review_batch(
         batch_units: list, start_idx: int
-    ) -> list[ReviewedUnit]:
+    ) -> tuple[list[ReviewedUnit], int]:
         """Review a single accumulated batch.
 
         Returns:
-            List of ReviewedUnit with revise or reject verdicts.
+            Tuple of (review results, actual input XML char length).
         """
-        qa_runner = QARunner(target_lang=target_lang)
         qa_reports = qa_runner.check_units(batch_units, start_index=start_idx)
 
         review_reports, review_units = _filter_review_units(
             batch_units, qa_reports, start_index=start_idx, strict=strict
         )
         if not review_units:
-            return []
+            return [], 0
 
         input_xml = _build_review_input_xml(review_units, review_reports)
         deps = ReviewDeps(
@@ -174,13 +174,13 @@ async def _run_review_async(
             input_xml, deps=deps, message_history=history
         )
         history.extend(result.new_messages())
-        return result.output.units
+        return result.output.units, len(input_xml)
 
     with progress if owns_progress else nullcontext():
         for unit in units:
             src_len = len(unit.source or "")
             if batch and char_count + src_len > context_length:
-                reviewed = await _review_batch(batch, next_start_index)
+                reviewed, xml_len = await _review_batch(batch, next_start_index)
                 for r in reviewed:
                     summary[r.verdict] = summary.get(r.verdict, 0) + 1
                 summary["pass"] += len(batch) - len(reviewed)
@@ -194,14 +194,14 @@ async def _run_review_async(
                 progress.update(task_id, advance=len(batch))
                 next_start_index += len(batch)
                 batch = []
-                char_count = 0
+                char_count = xml_len
 
             batch.append(unit)
             char_count += src_len
 
     # Flush final batch
     if batch:
-        reviewed = await _review_batch(batch, next_start_index)
+        reviewed, _ = await _review_batch(batch, next_start_index)
         for r in reviewed:
             summary[r.verdict] = summary.get(r.verdict, 0) + 1
         summary["pass"] += len(batch) - len(reviewed)
