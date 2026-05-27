@@ -1200,3 +1200,30 @@ def test_po_apply_batch_ok_on_plural_count_match():
         ],
     )
     assert not u.isfuzzy()
+
+
+def test_get_untranslated_includes_partial_plural():
+    """Partially translated plural units should be treated as untranslated."""
+    pf = po.pofile()
+    pf.parseheader()["Plural-Forms"] = "nplurals=2; plural=n != 1;"
+    u = po.pounit()
+    u.source = multistring(["item", "items"])
+    u.target = multistring(["Element", ""])
+    pf.addunit(u)
+    result = PoTranslator.get_untranslated(pf)
+    assert len(result) == 1
+    assert result[0] is u
+
+
+def test_get_untranslated_includes_short_plural():
+    """Plural unit with fewer target slots than required forms is untranslated."""
+    pf = po.pofile()
+    pf.settargetlanguage("ru")
+    u = po.pounit()
+    u.source = multistring(["item", "items"])
+    u.target = multistring(["один", "несколько"])
+    # Only 2 of 3 forms present
+    pf.addunit(u)
+    result = PoTranslator.get_untranslated(pf)
+    assert len(result) == 1
+    assert result[0] is u
