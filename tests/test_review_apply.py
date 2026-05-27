@@ -110,7 +110,21 @@ class TestPoReviewApply:
             ReviewedUnit(index=2, verdict="revise", corrected="修正", note="fix"),
             ReviewedUnit(index=3, verdict="reject", note="wrong"),
         ]
-        PoTranslator.apply_review_batch(units[1:], results)
+        PoTranslator.apply_review_batch(units[1:], results, start_index=2)
         assert not units[0].isfuzzy()
         assert units[1].isfuzzy()
+        assert units[2].isfuzzy()
+
+    def test_sparse_results_skip_clean_units(self):
+        pofile = _po(
+            '#: src/a.py:1\nmsgid "Hello"\nmsgstr "你好"\n\n'
+            '#: src/a.py:2\nmsgid "World"\nmsgstr "世界"\n\n'
+            '#: src/a.py:3\nmsgid "Error"\nmsgstr "错误"\n'
+        )
+        units = [u for u in pofile.units if u.source]
+        # Only unit 3 has a problem; units 1 and 2 are clean (omitted)
+        results = [ReviewedUnit(index=3, verdict="reject", note="wrong")]
+        PoTranslator.apply_review_batch(units, results, start_index=1)
+        assert not units[0].isfuzzy()
+        assert not units[1].isfuzzy()
         assert units[2].isfuzzy()

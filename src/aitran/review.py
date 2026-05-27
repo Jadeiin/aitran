@@ -81,6 +81,7 @@ def _filter_review_units(
     units: list,
     qa_reports: list[UnitQAReport],
     *,
+    start_index: int,
     strict: bool,
 ) -> tuple[list[UnitQAReport], list]:
     """Filter units for review.
@@ -93,7 +94,7 @@ def _filter_review_units(
     filtered_reports: list[UnitQAReport] = []
     filtered_units: list = []
     for i, u in enumerate(units):
-        idx = i + 1  # 1-based
+        idx = start_index + i
         report = qa_by_index.get(idx)
         has_qa_errors = report is not None and report.has_errors
         is_fuzzy = getattr(u, "isfuzzy", lambda: False)()
@@ -159,7 +160,7 @@ async def _run_review_async(
         qa_reports = qa_runner.check_units(batch_units, start_index=start_idx)
 
         review_reports, review_units = _filter_review_units(
-            batch_units, qa_reports, strict=strict
+            batch_units, qa_reports, start_index=start_idx, strict=strict
         )
         if not review_units:
             return []
@@ -171,9 +172,7 @@ async def _run_review_async(
             source_lang=source_lang,
             target_lang=target_lang,
             context="",
-            expected_indices=tuple(
-                range(start_idx, start_idx + len(review_units))
-            ),
+            expected_indices=tuple(r.index for r in review_reports),
         )
         result = await agent.run(input_xml, deps=deps)
         return result.output.units
@@ -187,7 +186,10 @@ async def _run_review_async(
                     summary[r.verdict] = summary.get(r.verdict, 0) + 1
                 summary["pass"] += len(batch) - len(reviewed)
                 translator.apply_review_batch(
-                    batch, reviewed, auto_fix=auto_fix
+                    batch,
+                    reviewed,
+                    start_index=next_start_index,
+                    auto_fix=auto_fix,
                 )
                 translator.save(store, output_path)
                 progress.update(task_id, advance=len(batch))
@@ -204,7 +206,12 @@ async def _run_review_async(
         for r in reviewed:
             summary[r.verdict] = summary.get(r.verdict, 0) + 1
         summary["pass"] += len(batch) - len(reviewed)
-        translator.apply_review_batch(batch, reviewed, auto_fix=auto_fix)
+        translator.apply_review_batch(
+            batch,
+            reviewed,
+            start_index=next_start_index,
+            auto_fix=auto_fix,
+        )
         translator.save(store, output_path)
         progress.update(task_id, advance=len(batch))
 

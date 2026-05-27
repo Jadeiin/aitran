@@ -167,6 +167,7 @@ class PoTranslator:
         units: list[po.pounit],
         results: list[ReviewedUnit],
         *,
+        start_index: int = 1,
         auto_fix: bool = False,
     ) -> None:
         """Apply review results to PO units.
@@ -175,7 +176,11 @@ class PoTranslator:
         with a review note.  With *auto_fix*, also writes the corrected target
         and clears the fuzzy marker.
         """
-        for unit, result in zip(units, results, strict=True):
+        by_index = {r.index: r for r in results}
+        for i, unit in enumerate(units):
+            result = by_index.get(start_index + i)
+            if result is None:
+                continue
             if auto_fix and result.corrected is not None:
                 unit.target = xml_helpers.valid_chars_only(result.corrected)
                 unit.markfuzzy(False)
@@ -269,6 +274,7 @@ class XliffTranslator:
         units: list[xliff.xliffunit],
         results: list[ReviewedUnit],
         *,
+        start_index: int = 1,
         auto_fix: bool = False,
     ) -> None:
         """Apply review results to XLIFF units.
@@ -277,7 +283,11 @@ class XliffTranslator:
         needs-review with a note.  With *auto_fix*, also writes the corrected
         target and marks translated.
         """
-        for unit, result in zip(units, results, strict=True):
+        by_index = {r.index: r for r in results}
+        for i, unit in enumerate(units):
+            result = by_index.get(start_index + i)
+            if result is None:
+                continue
             if auto_fix and result.corrected is not None:
                 unit.settarget(xml_helpers.valid_chars_only(result.corrected))
                 unit.marktranslated()
