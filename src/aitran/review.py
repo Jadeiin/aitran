@@ -144,6 +144,7 @@ async def _run_review_async(
     batch: list = []
     char_count = 0
     next_start_index = 1
+    history: list = []
 
     async def _review_batch(
         batch_units: list, start_idx: int
@@ -169,7 +170,10 @@ async def _run_review_async(
             context="",
             expected_indices=tuple(r.index for r in review_reports),
         )
-        result = await agent.run(input_xml, deps=deps)
+        result = await agent.run(
+            input_xml, deps=deps, message_history=history
+        )
+        history.extend(result.new_messages())
         return result.output.units
 
     with progress if owns_progress else nullcontext():
