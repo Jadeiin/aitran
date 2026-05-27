@@ -1,0 +1,124 @@
+"""Tests for review apply_batch on PO and XLIFF adapters."""
+
+from translate.storage import po
+
+from aitran.agents.reviewer import ReviewedUnit
+from aitran.translate import PoTranslator
+
+
+def _po(content: str) -> po.pofile:
+    return po.pofile.parsestring(content.encode())
+
+
+class TestPoReviewApply:
+    def test_pass_does_not_modify_unit(self):
+        pofile = _po('#: src/a.py:1\nmsgid "Hello"\nmsgstr "你好"\n')
+        unit = pofile.units[0]
+        results = [ReviewedUnit(index=1, verdict="pass")]
+        PoTranslator.apply_review_batch([unit], results)
+        assert unit.target == "你好"
+        assert not unit.isfuzzy()
+
+    def test_revise_marks_fuzzy_with_note(self):
+        pofile = _po('#: src/a.py:1\nmsgid "Hello %s"\nmsgstr "你好"\n')
+        unit = pofile.units[0]
+        results = [
+            ReviewedUnit(
+                index=1,
+                verdict="revise",
+                corrected="你好 %s",
+                note="missing placeholder %s",
+            )
+        ]
+        PoTranslator.apply_review_batch([unit], results)
+        assert unit.isfuzzy()
+        assert unit.target == "你好"  # not changed without auto_fix
+
+    def test_revise_auto_fix_writes_correction(self):
+        pofile = _po('#: src/a.py:1\nmsgid "Hello %s"\nmsgstr "你好"\n')
+        unit = pofile.units[0]
+        results = [
+            ReviewedUnit(
+                index=1,
+                verdict="revise",
+                corrected="你好 %s",
+                note="missing placeholder %s",
+            )
+        ]
+        PoTranslator.apply_review_batch([unit], results, auto_fix=True)
+        assert not unit.isfuzzy()
+        assert unit.target == "你好 %s"
+
+    def test_reject_without_correction_marks_fuzzy(self):
+        pofile = _po('#: src/a.py:1\nmsgid "Hello"\nmsgstr "你好"\n')
+        unit = pofile.units[0]
+        results = [
+            ReviewedUnit(
+                index=1,
+                verdict="reject",
+                note="meaning is wrong",
+            )
+        ]
+        PoTranslator.apply_review_batch([unit], results)
+        assert unit.isfuzzy()
+
+    def test_reject_auto_fix_without_correction_keeps_fuzzy(self):
+        pofile = _po('#: src/a.py:1\nmsgid "Hello"\nmsgstr "你好"\n')
+        unit = pofile.units[0]
+        results = [
+            ReviewedUnit(
+                index=1,
+                verdict="reject",
+                note="meaning is wrong",
+            )
+        ]
+        PoTranslator.apply_review_batch([unit], results, auto_fix=True)
+        # reject without corrected → still fuzzy, target unchanged
+        assert unit.isfuzzy()
+
+    def test_reject_auto_fix_with_correction_writes(self):
+        pofile = _po('#: src/a.py:1\nmsgid "Hello %s"\nmsgstr "你好"\n')
+        unit = pofile.units[0]
+        results = [
+            ReviewedUnit(
+                index=1,
+                verdict="reject",
+                corrected="你好 %s",
+                note="placeholder missing",
+            )
+        ]
+        PoTranslator.apply_review_batch([unit], results, auto_fix=True)
+        assert not unit.isfuzzy()
+        assert unit.target == "你好 %s"
+
+    def test_review_note_is_added(self):
+        pofile = _po('#: src/a.py:1\nmsgid "Hello"\nmsgstr "你好"\n')
+        unit = pofile.units[0]
+        results = [
+            ReviewedUnit(
+                index=1,
+                verdict="revise",
+                note="check punctuation",
+            )
+        ]
+        PoTranslator.apply_review_batch([unit], results)
+        notes = unit.getnotes()
+        assert "review" in notes.lower()
+        assert "check punctuation" in notes
+
+    def test_mixed_results(self):
+        pofile = _po(
+            '#: src/a.py:1\nmsgid "Hello"\nmsgstr "你好"\n\n'
+            '#: src/a.py:2\nmsgid "World"\nmsgstr "世界"\n\n'
+            '#: src/a.py:3\nmsgid "Error"\nmsgstr "错误"\n'
+        )
+        units = [u for u in pofile.units if u.source]
+        results = [
+            ReviewedUnit(index=1, verdict="pass"),
+            ReviewedUnit(index=2, verdict="revise", corrected="修正", note="fix"),
+            ReviewedUnit(index=3, verdict="reject", note="wrong"),
+        ]
+        PoTranslator.apply_review_batch(units, results)
+        assert not units[0].isfuzzy()
+        assert units[1].isfuzzy()
+        assert units[2].isfuzzy()

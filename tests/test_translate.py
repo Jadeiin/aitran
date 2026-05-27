@@ -14,7 +14,7 @@ from translate.misc import xml_helpers
 from translate.misc.multistring import multistring
 from translate.storage import po
 
-from aitran.agent import (
+from aitran.agents import (
     TranslatedUnit,
     TranslationDeps,
     build_input_xml,

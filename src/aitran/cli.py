@@ -18,6 +18,7 @@ from aitran.manipulate import remove_by_options
 from aitran.observability import ObservabilityError, flush_logfire, setup_logfire
 from aitran.sync import sync
 from aitran.translate import (
+    review_po,
     translate_po,
     translate_po_dir,
     translate_xliff_dir,
@@ -354,6 +355,99 @@ def translate(
             sys.exit(1)
     finally:
         flush_logfire(enabled=logfire_enabled)
+
+
+@app.command("review", context_settings=CONTEXT_SETTINGS)
+@click.option(
+    "-m",
+    "--model",
+    envvar="AITRAN_MODEL",
+    default="deepseek:deepseek-v4-flash",
+    help=(
+        "Model in <provider>:<model> format "
+        "(e.g. openai:gpt-5.4-mini, anthropic:claude-haiku-4-5)"
+    ),
+)
+@click.option(
+    "-k", "--key", envvar="AITRAN_API_KEY", help="API key for the LLM provider"
+)
+@click.option("--host", envvar="AITRAN_API_HOST", help="Custom API base URL")
+@click.option(
+    "-t",
+    "--temperature",
+    envvar="AITRAN_MODEL_TMP",
+    type=float,
+    default=0.1,
+    help="LLM temperature (0.0-2.0)",
+)
+@click.option("--po", "po_file", type=click.Path(exists=True), help="PO file path")
+@click.option("-src", "--source", default="en", help="Source language (ISO 639-1)")
+@click.option("-l", "--lang", help="Target language (ISO 639-1)")
+@click.option(
+    "--context-length",
+    type=int,
+    default=4096,
+    help="Max accumulated source length per API batch",
+)
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Review all units (default: only units with QA errors or markers)",
+)
+@click.option(
+    "--auto-fix",
+    is_flag=True,
+    help="Write corrected targets back to the file",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(),
+    help="Output file path (default: overwrite input)",
+)
+def review(
+    model: str,
+    key: str | None,
+    host: str | None,
+    temperature: float,
+    po_file: str | None,
+    source: str,
+    lang: str | None,
+    context_length: int,
+    strict: bool,
+    auto_fix: bool,
+    output: str | None,
+) -> None:
+    """Review translated PO/XLIFF files using QA + LLM.
+
+    Runs rule-based QA checks, then sends problematic units to an LLM
+    reviewer for final verdict (pass/revise/reject).
+    """
+    if not po_file:
+        click.echo("Error: --po is required", err=True)
+        sys.exit(1)
+
+    summary = review_po(
+        model=model,
+        po_path=po_file,
+        source_lang=source,
+        target_lang=lang or "",
+        output_path=output or po_file,
+        context_length=context_length,
+        strict=strict,
+        auto_fix=auto_fix,
+        api_key=key,
+        api_host=host,
+        temperature=temperature,
+    )
+
+    total = sum(summary.values())
+    click.echo(
+        f"\nReviewed: {total} units\n"
+        f"  pass:   {summary.get('pass', 0)}\n"
+        f"  revise: {summary.get('revise', 0)}\n"
+        f"  reject: {summary.get('reject', 0)}"
+    )
 
 
 @app.command("sync", context_settings=CONTEXT_SETTINGS)

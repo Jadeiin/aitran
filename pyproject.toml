@@ -93,7 +93,7 @@ future-annotations = true
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D", "DOC"]
-"src/aitran/prompts/**" = ["E501", "RUF067"]
+"src/aitran/agents/**" = ["E501"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
