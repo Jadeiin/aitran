@@ -149,14 +149,17 @@ class PoTranslator:
         results: list[TranslatedUnit],
     ) -> None:
         """Apply a batch of agent results."""
+        plural_tags = po_file.get_plural_tags()
         for unit, result in zip(units, results, strict=True):
             cleaned = [
                 xml_helpers.valid_chars_only(t) for t in result.targets
             ]
             if unit.hasplural():
+                if len(cleaned) != len(plural_tags):
+                    result.fuzzy = True
                 target = po.pounit.sync_plural_count(
                     multistring(cleaned),
-                    po_file.get_plural_tags(),
+                    plural_tags,
                 )
             else:
                 target = cleaned[0]
@@ -303,9 +306,14 @@ async def _translate_batch(
         tu = by_index[start_index + i]
         # Reverse XML escaping applied by format_as_xml only when the source
         # had raw markup. Already-escaped source strings must remain escaped.
-        source = str(units[i].source)
+        raw = units[i].source
+        source_strings = (
+            raw.strings if hasattr(raw, "strings") else [str(raw)]
+        )
+        combined_source = " ".join(str(s) for s in source_strings)
         tu.targets = [
-            _decode_serialized_markup(source, t) for t in tu.targets
+            _decode_serialized_markup(combined_source, t)
+            for t in tu.targets
         ]
         results.append(tu)
     return results

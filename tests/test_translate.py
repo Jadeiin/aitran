@@ -1160,3 +1160,43 @@ async def test_translate_batch_plural_targets_entity_decode():
             on_progress=None,
         )
     assert results[0].targets == ["<code> 链接", "<code> 链接"]
+
+
+# ── Plural validation ──────────────────────────────────────────────
+
+
+def test_po_apply_batch_marks_fuzzy_on_plural_count_mismatch():
+    """Plural unit with wrong target count should be marked fuzzy."""
+    pf = po.pofile()
+    u = po.pounit()
+    u.source = multistring(["item", "items"])
+    pf.addunit(u)
+    # German needs 2 plural forms, but model returns only 1
+    pf.parseheader()["Plural-Forms"] = "nplurals=2; plural=n != 1;"
+    PoTranslator.apply_batch(
+        pf,
+        [u],
+        [TranslatedUnit(index=1, targets=["ein Element"], fuzzy=False)],
+    )
+    assert u.isfuzzy()
+
+
+def test_po_apply_batch_ok_on_plural_count_match():
+    """Plural unit with correct target count should not be forced fuzzy."""
+    pf = po.pofile()
+    u = po.pounit()
+    u.source = multistring(["item", "items"])
+    pf.addunit(u)
+    pf.parseheader()["Plural-Forms"] = "nplurals=2; plural=n != 1;"
+    PoTranslator.apply_batch(
+        pf,
+        [u],
+        [
+            TranslatedUnit(
+                index=1,
+                targets=["ein Element", "mehrere Elemente"],
+                fuzzy=False,
+            )
+        ],
+    )
+    assert not u.isfuzzy()
