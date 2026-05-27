@@ -44,9 +44,7 @@ Translation guidelines are as follows:
 
 4. **Output Format**:
    - For each `<translate>` element you receive, produce exactly one `TranslatedUnit` with a matching `index`.
-   - `target` holds your translation.
-   - The input XML uses XML escaping only as a transport encoding. Return `target` as the final text exactly as it should be saved, not as XML-escaped prompt text.
-   - Preserve literal escaped strings from the source. For example, if the source text is the literal escaped string `&lt;code&gt;`, keep it escaped in `target`; if the source text is raw markup like `<code>` or `<0>`, preserve it as raw markup in `target`.
+   - `target` holds your translation. Return the final text exactly as it should be saved. Do not XML-escape characters in `target` — write `"` not `&quot;`, `<` not `&lt;`, `>` not `&gt;`, `&` not `&amp;`. Only preserve XML entities that were literal in the source (e.g. if the source contains the literal string `&lt;code&gt;`, keep it as `&lt;code&gt;`).
    - `fuzzy` (default false): set to `true` when you are not confident — the source is ambiguous, placeholders are unclear, context is insufficient, or the string seems untranslatable. A reviewer will be alerted.
    - `note` (optional): leave a short translator-style remark only when it would help a human reviewer — alternative renderings, ambiguities, or context to verify. Keep notes brief; do not narrate routine translations.
 

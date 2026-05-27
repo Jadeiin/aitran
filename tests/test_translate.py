@@ -790,24 +790,24 @@ async def test_translate_batch_rejects_extra_indices():
     assert call_count >= 2  # retried after extra index
 
 
-# ── Translation result text handling ─────────────────────────────────
+# ── HTML entity unescaping ──────────────────────────────────────────
 
 
-async def test_translate_batch_preserves_model_target_verbatim():
-    """The model returns final target text; batch handling should not unescape it."""
+async def test_translate_batch_unescapes_html_entities():
+    """format_as_xml escapes <>& in source; target should be unescaped back."""
     model = TestModel(
         custom_output_args={
             "translations": [
                 {
                     "index": 1,
-                    "target": "AT&amp;T <0>链接</0> &lt;code&gt;",
+                    "target": "点击 &lt;code&gt;btn&lt;/code&gt;",
                     "fuzzy": False,
                 },
             ],
         }
     )
     agent = build_translator_agent(model)
-    units = [FakeUnit("AT&amp;T <0>link</0> &lt;code&gt;")]
+    units = [FakeUnit("click <code>btn</code>")]
     with agent.override(model=model):
         results = await _translate_batch(
             agent,
@@ -817,7 +817,155 @@ async def test_translate_batch_preserves_model_target_verbatim():
             [],
             on_progress=None,
         )
-    assert results[0].target == "AT&amp;T <0>链接</0> &lt;code&gt;"
+    assert results[0].target == "点击 <code>btn</code>"
+
+
+async def test_translate_batch_unescapes_mixed_markup_entities():
+    """Toolkit entity decode reverses format_as_xml escaping for common tags."""
+    encoded = (
+        'Open &lt;a href="/docs?a=1&amp;b=2"&gt;docs&lt;/a&gt;, '
+        "see &lt;strong&gt;bold&lt;/strong&gt;, "
+        "&lt;code&gt;x &amp; y&lt;/code&gt; &lt;br/&gt;"
+    )
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "target": encoded,
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [
+        FakeUnit(
+            'Open <a href="/docs?a=1&b=2">docs</a>, '
+            "see <strong>bold</strong>, <code>x & y</code> <br/>"
+        )
+    ]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,)),
+            [],
+            on_progress=None,
+        )
+    assert results[0].target == (
+        'Open <a href="/docs?a=1&amp;b=2">docs</a>, '
+        "see <strong>bold</strong>, <code>x & y</code> <br/>"
+    )
+
+
+async def test_translate_batch_preserves_non_xml_text_entities():
+    """Only XML text serialization entities should be decoded."""
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "target": "版权 &copy; &amp; Co &quot;quoted&quot;",
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [FakeUnit('Copyright © & Co "quoted"')]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,)),
+            [],
+            on_progress=None,
+        )
+    assert results[0].target == "版权 &copy; & Co &quot;quoted&quot;"
+
+
+async def test_translate_batch_unescapes_plain_ampersands():
+    """Prompt XML escaping of plain ampersands should be reversed."""
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "target": "AT&amp;T 和 Rock &amp; Roll",
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [FakeUnit("AT&T and Rock & Roll")]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,)),
+            [],
+            on_progress=None,
+        )
+    assert results[0].target == "AT&T 和 Rock & Roll"
+
+
+async def test_translate_batch_unescapes_numeric_placeholder_tags():
+    """Numeric rich-text placeholders are XML-like tags, not HTML tags."""
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "target": "&lt;0&gt;链接&lt;/0&gt;",
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [FakeUnit("<0>link</0>")]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,)),
+            [],
+            on_progress=None,
+        )
+    assert results[0].target == "<0>链接</0>"
+
+
+async def test_translate_batch_preserves_source_escaped_strings():
+    """Entities already escaped in the source should stay escaped in target."""
+    model = TestModel(
+        custom_output_args={
+            "translations": [
+                {
+                    "index": 1,
+                    "target": "显示 &lt;code&gt;btn&lt;/code&gt;",
+                    "fuzzy": False,
+                },
+            ],
+        }
+    )
+    agent = build_translator_agent(model)
+    units = [FakeUnit("show &lt;code&gt;btn&lt;/code&gt;")]
+    with agent.override(model=model):
+        results = await _translate_batch(
+            agent,
+            units,
+            1,
+            _make_deps((1,)),
+            [],
+            on_progress=None,
+        )
+    assert results[0].target == "显示 &lt;code&gt;btn&lt;/code&gt;"
 
 
 def test_translate_po_dir_runs_files_in_parallel(monkeypatch, tmp_path):
