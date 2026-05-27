@@ -41,6 +41,22 @@ class TestPoReviewApply:
         assert not unit.isfuzzy()
         assert unit.target == "你好 %s"
 
+    def test_auto_fix_decodes_xml_escaped_correction(self):
+        pofile = _po(
+            '#: src/a.py:1\nmsgid "Click <b>here</b>"\nmsgstr "点击"\n'
+        )
+        unit = pofile.units[0]
+        results = [
+            ReviewedUnit(
+                index=1,
+                verdict="revise",
+                corrected="点击&lt;b&gt;此处&lt;/b&gt;",
+                note="missing markup",
+            )
+        ]
+        PoTranslator.apply_review_batch(pofile, [unit], results, auto_fix=True)
+        assert unit.target == "点击<b>此处</b>"
+
     def test_reject_without_correction_marks_fuzzy(self):
         pofile = _po('#: src/a.py:1\nmsgid "Hello"\nmsgstr "你好"\n')
         unit = pofile.units[0]

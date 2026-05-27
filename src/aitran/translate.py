@@ -205,7 +205,10 @@ class PoTranslator:
             if result is None:
                 continue
             if auto_fix and result.corrected is not None:
-                corrected = xml_helpers.valid_chars_only(result.corrected)
+                corrected = _decode_serialized_markup(
+                    str(unit.source),
+                    xml_helpers.valid_chars_only(result.corrected),
+                )
                 if unit.hasplural():
                     existing = (
                         unit.target.strings
@@ -325,7 +328,12 @@ class XliffTranslator:
             if result is None:
                 continue
             if auto_fix and result.corrected is not None:
-                unit.settarget(xml_helpers.valid_chars_only(result.corrected))
+                unit.settarget(
+                    _decode_serialized_markup(
+                        str(unit.source),
+                        xml_helpers.valid_chars_only(result.corrected),
+                    )
+                )
                 unit.marktranslated()
             else:
                 unit.markreviewneeded()
