@@ -16,9 +16,9 @@ from aitran.crowdin import list_projects as crowdin_list_projects
 from aitran.crowdin import upload_translation as crowdin_upload_translation
 from aitran.manipulate import remove_by_options
 from aitran.observability import ObservabilityError, flush_logfire, setup_logfire
+from aitran.review import review_po
 from aitran.sync import sync
 from aitran.translate import (
-    review_po,
     translate_po,
     translate_po_dir,
     translate_xliff_dir,
@@ -405,6 +405,24 @@ def translate(
     type=click.Path(),
     help="Output file path (default: overwrite input)",
 )
+@click.option(
+    "--logfire",
+    is_flag=True,
+    envvar="AITRAN_LOGFIRE",
+    help=(
+        "Enable Pydantic Logfire tracing for agent/model runs. "
+        "Prompts and completions may be sent to Logfire."
+    ),
+)
+@click.option(
+    "--logfire-capture-http",
+    is_flag=True,
+    envvar="AITRAN_LOGFIRE_CAPTURE_HTTP",
+    help=(
+        "Also capture provider HTTP headers and bodies in Logfire. "
+        "This may include prompts, completions, and credentials."
+    ),
+)
 def review(
     model: str,
     key: str | None,
@@ -417,29 +435,46 @@ def review(
     strict: bool,
     auto_fix: bool,
     output: str | None,
+    logfire: bool,
+    logfire_capture_http: bool,
 ) -> None:
     """Review translated PO/XLIFF files using QA + LLM.
 
     Runs rule-based QA checks, then sends problematic units to an LLM
     reviewer for final verdict (pass/revise/reject).
+
+    Raises:
+        click.ClickException: If optional observability setup fails.
     """
     if not po_file:
         click.echo("Error: --po is required", err=True)
         sys.exit(1)
 
-    summary = review_po(
-        model=model,
-        po_path=po_file,
-        source_lang=source,
-        target_lang=lang or "",
-        output_path=output or po_file,
-        context_length=context_length,
-        strict=strict,
-        auto_fix=auto_fix,
-        api_key=key,
-        api_host=host,
-        temperature=temperature,
-    )
+    logfire_enabled = False
+    try:
+        logfire_enabled = setup_logfire(
+            enabled=logfire,
+            capture_http=logfire_capture_http,
+        )
+    except ObservabilityError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        summary = review_po(
+            model=model,
+            po_path=po_file,
+            source_lang=source,
+            target_lang=lang or "",
+            output_path=output or po_file,
+            context_length=context_length,
+            strict=strict,
+            auto_fix=auto_fix,
+            api_key=key,
+            api_host=host,
+            temperature=temperature,
+        )
+    finally:
+        flush_logfire(enabled=logfire_enabled)
 
     total = sum(summary.values())
     click.echo(
