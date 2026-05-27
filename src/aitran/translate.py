@@ -134,10 +134,22 @@ class PoTranslator:
             List of untranslated or fuzzy PO units.
         """
         result: list[po.pounit] = []
+        plural_tags = po_file.get_plural_tags()
         for unit in po_file.units:
             if unit.isheader():
                 continue
             if unit.istranslated() and not unit.isfuzzy():
+                # istranslated only checks singular form;
+                # verify all plural forms are non-empty.
+                if unit.hasplural() and len(plural_tags) > 1:
+                    targets = (
+                        unit.target.strings
+                        if hasattr(unit.target, "strings")
+                        else [unit.target]
+                    )
+                    if any(not t.strip() for t in targets):
+                        result.append(unit)
+                        continue
                 continue
             result.append(unit)
         return result
@@ -310,10 +322,12 @@ async def _translate_batch(
         source_strings = (
             raw.strings if hasattr(raw, "strings") else [str(raw)]
         )
-        combined_source = " ".join(str(s) for s in source_strings)
         tu.targets = [
-            _decode_serialized_markup(combined_source, t)
-            for t in tu.targets
+            _decode_serialized_markup(
+                str(source_strings[min(j, len(source_strings) - 1)]),
+                t,
+            )
+            for j, t in enumerate(tu.targets)
         ]
         results.append(tu)
     return results
