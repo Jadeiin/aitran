@@ -325,8 +325,13 @@ async def _translate_batch(
         source_strings = (
             raw.strings if hasattr(raw, "strings") else [str(raw)]
         )
-        if len(tu.targets) == 1 and len(source_strings) > 1:
-            # One-form plural: decode against all source forms combined.
+        if (
+            len(tu.targets) == 1
+            and len(source_strings) > 1
+            and deps.plural_tags
+            and len(deps.plural_tags) == 1
+        ):
+            # One-form plural (e.g. Chinese): decode against all source forms.
             combined = " ".join(str(s) for s in source_strings)
             tu.targets = [
                 _decode_serialized_markup(combined, tu.targets[0])
