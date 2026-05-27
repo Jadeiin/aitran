@@ -624,6 +624,8 @@ async def _run_translation_async(
                 next_start_index += len(batch)
                 batch = []
                 batch_retries = 0
+                rate_limit_retries = 0
+                server_error_retries = 0
                 return
 
     with progress if owns_progress else nullcontext():

@@ -14,7 +14,7 @@ src/aitran/
     __init__.py          # re-exports all public symbols
     _base.py             # build_model(), build_input_xml(), safe_prompt_text(), format_language_label()
     translator.py        # build_translator_agent(), TranslationBatch/TranslatedUnit, SYSTEM_PROMPT/USER_PROMPT
-    reviewer.py          # build_reviewer_agent(), ReviewBatch/ReviewedUnit (TODO)
+    reviewer.py          # build_reviewer_agent(), ReviewBatch/ReviewedUnit
   qa/
     __init__.py          # QA runner: runs translate-toolkit checkers, returns structured results
     checkers.py          # checker configuration, allowlist
@@ -41,7 +41,7 @@ aitran review file.po [--strict] [--auto-fix]
    - strict: all units
     │
     ▼
-5. Batch by char length (reuse translation batching)
+5. Batch by unit count (--batch-size)
 6. For each batch:
    - Build input XML: source + target + qa_errors
    - Run reviewer agent → ReviewBatch
@@ -59,11 +59,11 @@ aitran review file.po [--strict] [--auto-fix]
 ### CLI
 
 ```
-aitran review <file|directory> [options]
+aitran review (--po file.po | --xliff file.xlf) [options]
   --model             # reuse from translate
   --host              # reuse from translate
-  --api-key           # reuse from translate
-  --context-length    # reuse from translate
+  --key               # API key
+  --batch-size        # max units per review batch (default: 100)
   --strict            # review all units, not just problematic ones
   --auto-fix          # write corrected targets back to file
 ```
@@ -73,8 +73,8 @@ aitran review <file|directory> [options]
 ```python
 class ReviewedUnit(BaseModel):
     index: int
-    verdict: str           # "pass" | "revise" | "reject"
-    corrected: str | None  # corrected target (when verdict != "pass" and reviewer can fix)
+    verdict: str           # "revise" | "reject" (sparse: omitted units implicitly pass)
+    corrected: str | None  # corrected target (when reviewer can fix)
     note: str | None       # reason/explanation
 
 class ReviewBatch(BaseModel):
@@ -85,10 +85,10 @@ class ReviewBatch(BaseModel):
 
 | Verdict | Meaning | Non-auto-fix | Auto-fix |
 |---------|---------|-------------|----------|
-| `pass` | Translation is OK | No change | No change |
+| *(omitted)* | Translation is OK (sparse output) | No change | No change |
 | `revise` | Minor issue, has correction | Set fuzzy + note | Write corrected target, clear fuzzy |
 | `reject` + corrected | Serious issue, reviewer can fix | Set fuzzy + note | Write corrected target, clear fuzzy |
-| `reject` + no corrected | Serious issue, needs human retranslation | Set fuzzy + note | Clear target (back to untranslated) |
+| `reject` + no corrected | Serious issue, needs human retranslation | Set fuzzy + note | Set fuzzy + note (target unchanged) |
 
 ### Strict / Non-strict Mode
 
