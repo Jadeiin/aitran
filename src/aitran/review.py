@@ -112,7 +112,7 @@ async def _run_review_async(
     model_spec: str,
     translator,
     output_path: str,
-    context_length: int,
+    batch_size: int,
     *,
     auto_fix: bool = False,
     strict: bool = False,
@@ -123,8 +123,8 @@ async def _run_review_async(
 ) -> dict[str, int]:
     """Run QA + LLM review on translated units.
 
-    Processes units in serial batches (same batching strategy as
-    translation), reviewing each batch after accumulation.
+    Runs QA globally, filters to review-worthy units, then sends them
+    to the agent in fixed-size batches within the same conversation.
 
     Returns:
         Summary counts: ``{"pass": N, "revise": N, "reject": N}``.
@@ -138,81 +138,66 @@ async def _run_review_async(
 
     owns_progress = progress is None
     progress = progress or _build_progress()
-    task_id = progress.add_task("Reviewing", total=len(units))
 
-    summary: dict[str, int] = {"pass": 0, "revise": 0, "reject": 0}
-    batch: list = []
-    char_count = 0
-    next_start_index = 1
-    history: list = []
+    # Global QA + filtering: only review-worthy units go to the agent
     qa_runner = QARunner(target_lang=target_lang)
+    qa_reports = qa_runner.check_units(units, start_index=1)
+    review_reports, review_units = _filter_review_units(
+        units, qa_reports, start_index=1, strict=strict
+    )
+    review_count = len(review_units)
+    total_count = len(units)
 
-    async def _review_batch(
-        batch_units: list, start_idx: int
-    ) -> tuple[list[ReviewedUnit], int]:
-        """Review a single accumulated batch.
+    summary: dict[str, int] = {
+        "pass": total_count - review_count,
+        "revise": 0,
+        "reject": 0,
+    }
+    if not review_units:
+        print(f"Reviewed {total_count} units, all clean.")
+        return summary
+
+    task_id = progress.add_task("Reviewing", total=review_count)
+    history: list = []
+
+    async def _review_chunk(
+        chunk_units: list, chunk_reports: list[UnitQAReport]
+    ) -> list[ReviewedUnit]:
+        """Review a chunk of review-worthy units.
 
         Returns:
-            Tuple of (review results, actual input XML char length).
+            List of ReviewedUnit with revise or reject verdicts.
         """
-        qa_reports = qa_runner.check_units(batch_units, start_index=start_idx)
-
-        review_reports, review_units = _filter_review_units(
-            batch_units, qa_reports, start_index=start_idx, strict=strict
-        )
-        if not review_units:
-            return [], 0
-
-        input_xml = _build_review_input_xml(review_units, review_reports)
+        input_xml = _build_review_input_xml(chunk_units, chunk_reports)
         deps = ReviewDeps(
             source_lang=source_lang,
             target_lang=target_lang,
             context="",
-            expected_indices=tuple(r.index for r in review_reports),
+            expected_indices=tuple(r.index for r in chunk_reports),
         )
         result = await agent.run(
             input_xml, deps=deps, message_history=history
         )
         history.extend(result.new_messages())
-        return result.output.units, len(input_xml)
+        return result.output.units
 
     with progress if owns_progress else nullcontext():
-        for unit in units:
-            src_len = len(unit.source or "")
-            if batch and char_count + src_len > context_length:
-                reviewed, xml_len = await _review_batch(batch, next_start_index)
-                for r in reviewed:
-                    summary[r.verdict] = summary.get(r.verdict, 0) + 1
-                summary["pass"] += len(batch) - len(reviewed)
-                translator.apply_review_batch(
-                    batch,
-                    reviewed,
-                    start_index=next_start_index,
-                    auto_fix=auto_fix,
-                )
-                translator.save(store, output_path)
-                progress.update(task_id, advance=len(batch))
-                next_start_index += len(batch)
-                batch = []
-                char_count = xml_len
-
-            batch.append(unit)
-            char_count += src_len
-
-    # Flush final batch
-    if batch:
-        reviewed, _ = await _review_batch(batch, next_start_index)
-        for r in reviewed:
-            summary[r.verdict] = summary.get(r.verdict, 0) + 1
-        summary["pass"] += len(batch) - len(reviewed)
-        translator.apply_review_batch(
-            batch,
-            reviewed,
-            start_index=next_start_index,
-            auto_fix=auto_fix,
-        )
-        translator.save(store, output_path)
-        progress.update(task_id, advance=len(batch))
+        for start in range(0, review_count, batch_size):
+            chunk_units = review_units[start : start + batch_size]
+            chunk_reports = review_reports[start : start + batch_size]
+            reviewed = await _review_chunk(chunk_units, chunk_reports)
+            for r in reviewed:
+                summary[r.verdict] = summary.get(r.verdict, 0) + 1
+            summary["pass"] += len(chunk_units) - len(reviewed)
+            # Apply results to original units using original indices
+            translator.apply_review_batch(
+                units,
+                reviewed,
+                start_index=1,
+                auto_fix=auto_fix,
+            )
+            translator.save(store, output_path)
+            progress.update(task_id, advance=len(chunk_units))
 
     if owns_progress:
         progress.stop()
@@ -245,7 +230,7 @@ def review_po(
     source_lang: str,
     target_lang: str,
     output_path: str,
-    context_length: int,
+    batch_size: int,
     *,
     strict: bool = False,
     auto_fix: bool = False,
@@ -274,9 +259,13 @@ def review_po(
         )
         return {"pass": 0, "revise": 0, "reject": 0}
 
-    units = [u for u in po_file.units if u.source and not u.isheader()]
+    units = [
+        u
+        for u in po_file.units
+        if u.source and not u.isheader() and u.target
+    ]
     if not units:
-        print("No entries to review.")
+        print("No translated entries to review.")
         return {"pass": 0, "revise": 0, "reject": 0}
 
     return asyncio.run(
@@ -288,7 +277,7 @@ def review_po(
             model_spec=model,
             translator=translator,
             output_path=output_path,
-            context_length=context_length,
+            batch_size=batch_size,
             auto_fix=auto_fix,
             strict=strict,
             api_key=api_key,

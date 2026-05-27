@@ -364,7 +364,7 @@ def test_translate_po_infers_target_language_from_header(monkeypatch, tmp_path):
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     assert captured["target_lang"] == "zh_CN"
@@ -401,7 +401,7 @@ def test_translate_po_infers_legacy_target_language_from_script_header(
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     assert captured["target_lang"] == "zh_CN"
@@ -437,7 +437,7 @@ def test_translate_po_infers_target_language_from_language_team(monkeypatch, tmp
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     out = source.read_text(encoding="utf-8")
@@ -476,7 +476,7 @@ def test_translate_po_infers_target_language_from_poedit_headers(monkeypatch, tm
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     out = source.read_text(encoding="utf-8")
@@ -515,7 +515,7 @@ def test_translate_po_without_lang_or_header_reports_error(
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     captured = capsys.readouterr()
@@ -553,7 +553,7 @@ def test_translate_po_updates_last_translator_with_package_version(
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     out = source.read_text(encoding="utf-8")

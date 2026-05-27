@@ -197,10 +197,10 @@ def app() -> None:
     help="Text file with additional translation context",
 )
 @click.option(
-    "--context-length",
+    "--batch-size",
     type=int,
-    default=4096,
-    help="Max accumulated source length per API batch",
+    default=100,
+    help="Max units per API batch",
 )
 @click.option(
     "--jobs",
@@ -269,7 +269,7 @@ def translate(
     lang: str | None,
     verbose: bool,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     jobs: int,
     order: str,
     profile: str,
@@ -311,7 +311,7 @@ def translate(
         "target_lang": lang or "",
         "verbose": verbose,
         "context_file": context_file,
-        "context_length": context_length,
+        "batch_size": batch_size,
         "api_key": key,
         "api_host": host,
         "temperature": temperature,
@@ -384,10 +384,10 @@ def translate(
 @click.option("-src", "--source", default="en", help="Source language (ISO 639-1)")
 @click.option("-l", "--lang", help="Target language (ISO 639-1)")
 @click.option(
-    "--context-length",
+    "--batch-size",
     type=int,
-    default=4096,
-    help="Max accumulated source length per API batch",
+    default=100,
+    help="Max units per review batch",
 )
 @click.option(
     "--strict",
@@ -431,7 +431,7 @@ def review(
     po_file: str | None,
     source: str,
     lang: str | None,
-    context_length: int,
+    batch_size: int,
     strict: bool,
     auto_fix: bool,
     output: str | None,
@@ -466,7 +466,7 @@ def review(
             source_lang=source,
             target_lang=lang or "",
             output_path=output or po_file,
-            context_length=context_length,
+            batch_size=batch_size,
             strict=strict,
             auto_fix=auto_fix,
             api_key=key,

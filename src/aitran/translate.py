@@ -369,7 +369,7 @@ async def _run_translation_async(
     translator,  # PoTranslator | XliffTranslator
     output_path: str,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     verbose: bool,
     progress_label: str,
     *,
@@ -435,8 +435,6 @@ async def _run_translation_async(
         progress.update(task_id, completed=global_done)
 
     batch: list = []
-    char_count = 0
-    i = 0
     next_start_index = 1
     batch_retries = 0
     BATCH_MAX_RETRIES = 3
@@ -446,13 +444,8 @@ async def _run_translation_async(
     MAX_SERVER_ERROR_RETRIES = 3
 
     with progress if owns_progress else nullcontext():
-        while i < len(units):
-            unit = units[i]
-            src_len = len(unit.source)
-            if char_count < context_length:
-                batch.append(unit)
-                char_count += src_len
-            if char_count >= context_length or i == len(units) - 1:
+        for unit in units:
+            if len(batch) >= batch_size:
                 deps = TranslationDeps(
                     source_lang=source_lang,
                     target_lang=target_lang,
@@ -477,7 +470,6 @@ async def _run_translation_async(
                     _commit_batch()
                     next_start_index += len(batch)
                     batch = []
-                    char_count = 0
                     batch_retries = 0
                     rate_limit_retries = 0
                     server_error_retries = 0
@@ -554,10 +546,33 @@ async def _run_translation_async(
                     _commit_batch()
                     next_start_index += len(batch)
                     batch = []
-                    char_count = 0
                     batch_retries = 0
 
-            i += 1
+            batch.append(unit)
+
+    # Flush remaining units
+    if batch:
+        deps = TranslationDeps(
+            source_lang=source_lang,
+            target_lang=target_lang,
+            context=context,
+            dict_entries=dict_entries,
+            expected_indices=tuple(
+                range(next_start_index, next_start_index + len(batch))
+            ),
+        )
+        results = await _translate_batch(
+            agent,
+            batch,
+            next_start_index,
+            deps,
+            history,
+            on_unit_done,
+            profile=profile,
+        )
+        translator.apply_batch(store, batch, results)
+        translator.save(store, output_path)
+        _commit_batch()
 
 
 def _run_translation(
@@ -569,7 +584,7 @@ def _run_translation(
     translator,
     output_path: str,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     verbose: bool,
     progress_label: str,
     *,
@@ -589,7 +604,7 @@ def _run_translation(
             translator=translator,
             output_path=output_path,
             context_file=context_file,
-            context_length=context_length,
+            batch_size=batch_size,
             verbose=verbose,
             progress_label=progress_label,
             api_key=api_key,
@@ -648,7 +663,7 @@ def translate_po(
     verbose: bool,
     output_path: str,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     *,
     api_key: str | None = None,
     api_host: str | None = None,
@@ -697,7 +712,7 @@ def translate_po(
         translator=translator,
         output_path=output_path,
         context_file=context_file,
-        context_length=context_length,
+        batch_size=batch_size,
         verbose=verbose,
         progress_label=os.path.basename(output_path),
         api_key=api_key,
@@ -715,7 +730,7 @@ def translate_po_dir(
     target_lang: str,
     verbose: bool,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     jobs: int = 4,
     *,
     api_key: str | None = None,
@@ -747,7 +762,7 @@ def translate_po_dir(
                 verbose,
                 po_path,
                 context_file,
-                context_length,
+                batch_size,
                 api_key=api_key,
                 api_host=api_host,
                 temperature=temperature,
@@ -769,7 +784,7 @@ def translate_xliff_file(
     verbose: bool,
     output_path: str,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     *,
     api_key: str | None = None,
     api_host: str | None = None,
@@ -819,7 +834,7 @@ def translate_xliff_file(
         translator=translator,
         output_path=output_path,
         context_file=context_file,
-        context_length=context_length,
+        batch_size=batch_size,
         verbose=verbose,
         progress_label=os.path.basename(output_path),
         api_key=api_key,
@@ -837,7 +852,7 @@ def translate_xliff_dir(
     target_lang: str,
     verbose: bool,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     jobs: int = 4,
     *,
     api_key: str | None = None,
@@ -869,7 +884,7 @@ def translate_xliff_dir(
                 verbose,
                 xliff_path,
                 context_file,
-                context_length,
+                batch_size,
                 api_key=api_key,
                 api_host=api_host,
                 temperature=temperature,
