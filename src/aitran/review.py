@@ -286,3 +286,66 @@ def review_po(
             temperature=temperature,
         )
     )
+
+
+def review_xliff(
+    model: str,
+    xliff_path: str,
+    source_lang: str,
+    target_lang: str,
+    output_path: str,
+    batch_size: int,
+    *,
+    strict: bool = False,
+    auto_fix: bool = False,
+    api_key: str | None = None,
+    api_host: str | None = None,
+    temperature: float = 0.1,
+) -> dict[str, int]:
+    """Review a single XLIFF file.
+
+    Returns:
+        Summary counts: ``{"pass": N, "revise": N, "reject": N}``.
+    """
+    from aitran.translate import XliffTranslator
+
+    translator = XliffTranslator()
+    xlf = translator.parse(xliff_path)
+
+    if not target_lang:
+        target_lang = xlf.targetlanguage or ""
+    if not target_lang:
+        print(
+            "No target language specified via --lang or XLIFF header",
+            file=sys.stderr,
+        )
+        return {"pass": 0, "revise": 0, "reject": 0}
+
+    src = source_lang or xlf.sourcelanguage or "en"
+
+    units = [
+        u
+        for u in xlf.units
+        if (u.source or "").strip() and (u.target or "").strip()
+    ]
+    if not units:
+        print("No translated entries to review.")
+        return {"pass": 0, "revise": 0, "reject": 0}
+
+    return asyncio.run(
+        _run_review_async(
+            store=xlf,
+            units=units,
+            source_lang=src,
+            target_lang=target_lang,
+            model_spec=model,
+            translator=translator,
+            output_path=output_path,
+            batch_size=batch_size,
+            auto_fix=auto_fix,
+            strict=strict,
+            api_key=api_key,
+            api_host=api_host,
+            temperature=temperature,
+        )
+    )

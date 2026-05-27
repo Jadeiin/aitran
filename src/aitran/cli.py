@@ -16,7 +16,7 @@ from aitran.crowdin import list_projects as crowdin_list_projects
 from aitran.crowdin import upload_translation as crowdin_upload_translation
 from aitran.manipulate import remove_by_options
 from aitran.observability import ObservabilityError, flush_logfire, setup_logfire
-from aitran.review import review_po
+from aitran.review import review_po, review_xliff
 from aitran.sync import sync
 from aitran.translate import (
     translate_po,
@@ -385,6 +385,12 @@ def translate(
     help="LLM temperature (0.0-2.0)",
 )
 @click.option("--po", "po_file", type=click.Path(exists=True), help="PO file path")
+@click.option(
+    "--xliff",
+    "xliff_file",
+    type=click.Path(exists=True),
+    help="XLIFF/XLF file path",
+)
 @click.option("-src", "--source", default="en", help="Source language (ISO 639-1)")
 @click.option("-l", "--lang", help="Target language (ISO 639-1)")
 @click.option(
@@ -433,6 +439,7 @@ def review(
     host: str | None,
     temperature: float,
     po_file: str | None,
+    xliff_file: str | None,
     source: str,
     lang: str | None,
     batch_size: int,
@@ -450,8 +457,11 @@ def review(
     Raises:
         click.ClickException: If optional observability setup fails.
     """
-    if not po_file:
-        click.echo("Error: --po is required", err=True)
+    if not po_file and not xliff_file:
+        click.echo("Error: --po or --xliff is required", err=True)
+        sys.exit(1)
+    if po_file and xliff_file:
+        click.echo("Error: --po and --xliff are mutually exclusive", err=True)
         sys.exit(1)
 
     logfire_enabled = False
@@ -464,19 +474,34 @@ def review(
         raise click.ClickException(str(exc)) from exc
 
     try:
-        summary = review_po(
-            model=model,
-            po_path=po_file,
-            source_lang=source,
-            target_lang=lang or "",
-            output_path=output or po_file,
-            batch_size=batch_size,
-            strict=strict,
-            auto_fix=auto_fix,
-            api_key=key,
-            api_host=host,
-            temperature=temperature,
-        )
+        if po_file:
+            summary = review_po(
+                model=model,
+                po_path=po_file,
+                source_lang=source,
+                target_lang=lang or "",
+                output_path=output or po_file,
+                batch_size=batch_size,
+                strict=strict,
+                auto_fix=auto_fix,
+                api_key=key,
+                api_host=host,
+                temperature=temperature,
+            )
+        else:
+            summary = review_xliff(
+                model=model,
+                xliff_path=xliff_file,
+                source_lang=source,
+                target_lang=lang or "",
+                output_path=output or xliff_file,
+                batch_size=batch_size,
+                strict=strict,
+                auto_fix=auto_fix,
+                api_key=key,
+                api_host=host,
+                temperature=temperature,
+            )
     finally:
         flush_logfire(enabled=logfire_enabled)
 
