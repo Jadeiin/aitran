@@ -45,11 +45,11 @@ def _build_progress(console: Console | None = None) -> Progress:
 def _build_review_input_xml(
     units: list,
     qa_reports: list[UnitQAReport],
-    start_index: int,
 ) -> str:
     """Build XML input for the reviewer agent.
 
     Each unit includes source, target, and any QA errors.
+    Units and qa_reports are parallel lists with matching indices.
 
     Returns:
         XML string for the reviewer agent prompt.
@@ -58,17 +58,14 @@ def _build_review_input_xml(
 
     from aitran.agents._base import safe_prompt_text
 
-    qa_by_index = {r.index: r for r in qa_reports}
     items: list[dict] = []
-    for i, u in enumerate(units):
-        idx = start_index + i
+    for u, report in zip(units, qa_reports, strict=True):
         d: dict = {
-            "index": idx,
+            "index": report.index,
             "source": safe_prompt_text(u.source),
             "target": safe_prompt_text(u.target),
         }
-        report = qa_by_index.get(idx)
-        if report and report.has_errors:
+        if report.has_errors:
             d["qa-errors"] = "; ".join(
                 f"[{e.severity}] {e.checker}: {e.message}" for e in report.errors
             )
@@ -165,9 +162,7 @@ async def _run_review_async(
         if not review_units:
             return []
 
-        input_xml = _build_review_input_xml(
-            review_units, review_reports, start_idx
-        )
+        input_xml = _build_review_input_xml(review_units, review_reports)
         deps = ReviewDeps(
             source_lang=source_lang,
             target_lang=target_lang,
