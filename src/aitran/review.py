@@ -191,6 +191,7 @@ async def _run_review_async(
             summary["pass"] += len(chunk_units) - len(reviewed)
             # Apply results to original units using original indices
             translator.apply_review_batch(
+                store,
                 units,
                 reviewed,
                 start_index=1,

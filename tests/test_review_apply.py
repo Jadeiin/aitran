@@ -22,7 +22,7 @@ class TestPoReviewApply:
                 note="missing placeholder %s",
             )
         ]
-        PoTranslator.apply_review_batch([unit], results)
+        PoTranslator.apply_review_batch(pofile, [unit], results)
         assert unit.isfuzzy()
         assert unit.target == "你好"  # not changed without auto_fix
 
@@ -37,7 +37,7 @@ class TestPoReviewApply:
                 note="missing placeholder %s",
             )
         ]
-        PoTranslator.apply_review_batch([unit], results, auto_fix=True)
+        PoTranslator.apply_review_batch(pofile, [unit], results, auto_fix=True)
         assert not unit.isfuzzy()
         assert unit.target == "你好 %s"
 
@@ -51,7 +51,7 @@ class TestPoReviewApply:
                 note="meaning is wrong",
             )
         ]
-        PoTranslator.apply_review_batch([unit], results)
+        PoTranslator.apply_review_batch(pofile, [unit], results)
         assert unit.isfuzzy()
 
     def test_reject_auto_fix_without_correction_keeps_fuzzy(self):
@@ -64,7 +64,7 @@ class TestPoReviewApply:
                 note="meaning is wrong",
             )
         ]
-        PoTranslator.apply_review_batch([unit], results, auto_fix=True)
+        PoTranslator.apply_review_batch(pofile, [unit], results, auto_fix=True)
         # reject without corrected → still fuzzy, target unchanged
         assert unit.isfuzzy()
 
@@ -79,7 +79,7 @@ class TestPoReviewApply:
                 note="placeholder missing",
             )
         ]
-        PoTranslator.apply_review_batch([unit], results, auto_fix=True)
+        PoTranslator.apply_review_batch(pofile, [unit], results, auto_fix=True)
         assert not unit.isfuzzy()
         assert unit.target == "你好 %s"
 
@@ -93,7 +93,7 @@ class TestPoReviewApply:
                 note="check punctuation",
             )
         ]
-        PoTranslator.apply_review_batch([unit], results)
+        PoTranslator.apply_review_batch(pofile, [unit], results)
         notes = unit.getnotes()
         assert "review" in notes.lower()
         assert "check punctuation" in notes
@@ -110,7 +110,7 @@ class TestPoReviewApply:
             ReviewedUnit(index=2, verdict="revise", corrected="修正", note="fix"),
             ReviewedUnit(index=3, verdict="reject", note="wrong"),
         ]
-        PoTranslator.apply_review_batch(units[1:], results, start_index=2)
+        PoTranslator.apply_review_batch(pofile, units[1:], results, start_index=2)
         assert not units[0].isfuzzy()
         assert units[1].isfuzzy()
         assert units[2].isfuzzy()
@@ -124,7 +124,31 @@ class TestPoReviewApply:
         units = [u for u in pofile.units if u.source]
         # Only unit 3 has a problem; units 1 and 2 are clean (omitted)
         results = [ReviewedUnit(index=3, verdict="reject", note="wrong")]
-        PoTranslator.apply_review_batch(units, results, start_index=1)
+        PoTranslator.apply_review_batch(pofile, units, results, start_index=1)
         assert not units[0].isfuzzy()
         assert not units[1].isfuzzy()
         assert units[2].isfuzzy()
+
+    def test_auto_fix_plural_preserves_other_forms(self):
+        pofile = _po(
+            '#: src/a.py:1\n'
+            'msgid "apple"\n'
+            'msgid_plural "apples"\n'
+            'msgstr[0] "苹果"\n'
+            'msgstr[1] "苹果们"\n'
+        )
+        unit = pofile.units[0]
+        assert unit.hasplural()
+        results = [
+            ReviewedUnit(
+                index=1,
+                verdict="revise",
+                corrected="修正苹果",
+                note="fix first form",
+            )
+        ]
+        PoTranslator.apply_review_batch(pofile, [unit], results, auto_fix=True)
+        assert not unit.isfuzzy()
+        targets = unit.target.strings
+        assert targets[0] == "修正苹果"
+        assert targets[1] == "苹果们"

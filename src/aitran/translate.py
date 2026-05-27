@@ -186,6 +186,7 @@ class PoTranslator:
 
     @staticmethod
     def apply_review_batch(
+        po_file: po.pofile,
         units: list[po.pounit],
         results: list[ReviewedUnit],
         *,
@@ -204,7 +205,20 @@ class PoTranslator:
             if result is None:
                 continue
             if auto_fix and result.corrected is not None:
-                unit.target = xml_helpers.valid_chars_only(result.corrected)
+                corrected = xml_helpers.valid_chars_only(result.corrected)
+                if unit.hasplural():
+                    existing = (
+                        unit.target.strings
+                        if hasattr(unit.target, "strings")
+                        else [str(unit.target)]
+                    )
+                    forms = [corrected, *existing[1:]]
+                    unit.target = po.pounit.sync_plural_count(
+                        multistring(forms),
+                        po_file.get_plural_tags(),
+                    )
+                else:
+                    unit.target = corrected
                 unit.markfuzzy(False)
             else:
                 unit.markfuzzy(True)
