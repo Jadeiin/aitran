@@ -687,6 +687,19 @@ async def test_retrying_http_client_retries_rate_limits():
     assert attempts == 2
 
 
+async def test_retrying_http_client_preserves_model_timeout():
+    client = build_retrying_http_client(
+        httpx.MockTransport(lambda _: httpx.Response(200))
+    )
+    try:
+        assert client.timeout.connect == pytest.approx(5.0)
+        assert client.timeout.read == pytest.approx(600.0)
+        assert client.timeout.write == pytest.approx(600.0)
+        assert client.timeout.pool == pytest.approx(600.0)
+    finally:
+        await client.aclose()
+
+
 # ── Agent instructions injection ────────────────────────────────────
 
 

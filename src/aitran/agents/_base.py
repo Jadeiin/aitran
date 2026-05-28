@@ -97,6 +97,9 @@ def _raise_for_retryable_status(response: httpx.Response) -> None:
         response.raise_for_status()
 
 
+_MODEL_HTTP_TIMEOUT = httpx.Timeout(connect=5.0, read=600.0, write=600.0, pool=600.0)
+
+
 def build_retrying_http_client(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> httpx.AsyncClient:
@@ -127,7 +130,7 @@ def build_retrying_http_client(
         wrapped=transport,
         validate_response=_raise_for_retryable_status,
     )
-    return httpx.AsyncClient(transport=transport)
+    return httpx.AsyncClient(transport=transport, timeout=_MODEL_HTTP_TIMEOUT)
 
 
 def build_model(
