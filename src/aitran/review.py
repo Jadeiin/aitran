@@ -159,6 +159,7 @@ async def _run_review_async(
 
     task_id = progress.add_task("Reviewing", total=review_count)
     history: list = []
+    unit_by_index = dict(enumerate(units, start=1))
 
     async def _review_chunk(
         chunk_units: list, chunk_reports: list[UnitQAReport]
@@ -175,9 +176,7 @@ async def _run_review_async(
             context="",
             expected_indices=tuple(r.index for r in chunk_reports),
         )
-        result = await agent.run(
-            input_xml, deps=deps, message_history=history
-        )
+        result = await agent.run(input_xml, deps=deps, message_history=history)
         history.extend(result.new_messages())
         return result.output.units
 
@@ -189,12 +188,10 @@ async def _run_review_async(
             for r in reviewed:
                 summary[r.verdict] = summary.get(r.verdict, 0) + 1
             summary["pass"] += len(chunk_units) - len(reviewed)
-            # Apply results to original units using original indices
             translator.apply_review_batch(
                 store,
-                units,
+                unit_by_index,
                 reviewed,
-                start_index=1,
                 auto_fix=auto_fix,
             )
             translator.save(store, output_path)
@@ -260,11 +257,7 @@ def review_po(
         )
         return {"pass": 0, "revise": 0, "reject": 0}
 
-    units = [
-        u
-        for u in po_file.units
-        if u.source and not u.isheader() and u.target
-    ]
+    units = [u for u in po_file.units if u.source and not u.isheader() and u.target]
     if not units:
         print("No translated entries to review.")
         return {"pass": 0, "revise": 0, "reject": 0}
@@ -324,9 +317,7 @@ def review_xliff(
     src = source_lang or xlf.sourcelanguage or "en"
 
     units = [
-        u
-        for u in xlf.units
-        if (u.source or "").strip() and (u.target or "").strip()
+        u for u in xlf.units if (u.source or "").strip() and (u.target or "").strip()
     ]
     if not units:
         print("No translated entries to review.")

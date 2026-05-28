@@ -28,6 +28,8 @@ from aitran.agents import (
 from aitran.dicts import find_matching_entries
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from aitran.agents import TranslatedUnit
 
 _LEGACY_LANGUAGE_CODES = {
@@ -148,9 +150,8 @@ class PoTranslator:
                         if hasattr(unit.target, "strings")
                         else [unit.target]
                     )
-                    if (
-                        len(targets) < len(plural_tags)
-                        or any(not t.strip() for t in targets)
+                    if len(targets) < len(plural_tags) or any(
+                        not t.strip() for t in targets
                     ):
                         result.append(unit)
                         continue
@@ -167,9 +168,7 @@ class PoTranslator:
         """Apply a batch of agent results."""
         plural_tags = po_file.get_plural_tags()
         for unit, result in zip(units, results, strict=True):
-            cleaned = [
-                xml_helpers.valid_chars_only(t) for t in result.targets
-            ]
+            cleaned = [xml_helpers.valid_chars_only(t) for t in result.targets]
             if unit.hasplural():
                 if len(cleaned) != len(plural_tags):
                     result.fuzzy = True
@@ -187,10 +186,9 @@ class PoTranslator:
     @staticmethod
     def apply_review_batch(
         po_file: po.pofile,
-        units: list[po.pounit],
+        units_by_index: Mapping[int, po.pounit],
         results: list[ReviewedUnit],
         *,
-        start_index: int = 1,
         auto_fix: bool = False,
     ) -> None:
         """Apply review results to PO units.
@@ -199,11 +197,8 @@ class PoTranslator:
         with a review note.  With *auto_fix*, also writes the corrected target
         and clears the fuzzy marker.
         """
-        by_index = {r.index: r for r in results}
-        for i, unit in enumerate(units):
-            result = by_index.get(start_index + i)
-            if result is None:
-                continue
+        for result in results:
+            unit = units_by_index[result.index]
             if auto_fix and result.corrected is not None:
                 corrected = _decode_serialized_markup(
                     str(unit.source),
@@ -310,10 +305,10 @@ class XliffTranslator:
 
     @staticmethod
     def apply_review_batch(
-        units: list[xliff.xliffunit],
+        _store,
+        units_by_index: Mapping[int, xliff.xliffunit],
         results: list[ReviewedUnit],
         *,
-        start_index: int = 1,
         auto_fix: bool = False,
     ) -> None:
         """Apply review results to XLIFF units.
@@ -322,11 +317,8 @@ class XliffTranslator:
         needs-review with a note.  With *auto_fix*, also writes the corrected
         target and marks translated.
         """
-        by_index = {r.index: r for r in results}
-        for i, unit in enumerate(units):
-            result = by_index.get(start_index + i)
-            if result is None:
-                continue
+        for result in results:
+            unit = units_by_index[result.index]
             if auto_fix and result.corrected is not None:
                 unit.settarget(
                     _decode_serialized_markup(
@@ -405,9 +397,7 @@ async def _translate_batch(
         # Reverse XML escaping applied by format_as_xml only when the source
         # had raw markup. Already-escaped source strings must remain escaped.
         raw = units[i].source
-        source_strings = (
-            raw.strings if hasattr(raw, "strings") else [str(raw)]
-        )
+        source_strings = raw.strings if hasattr(raw, "strings") else [str(raw)]
         if (
             len(tu.targets) == 1
             and len(source_strings) > 1
@@ -416,9 +406,7 @@ async def _translate_batch(
         ):
             # One-form plural (e.g. Chinese): decode against all source forms.
             combined = " ".join(str(s) for s in source_strings)
-            tu.targets = [
-                _decode_serialized_markup(combined, tu.targets[0])
-            ]
+            tu.targets = [_decode_serialized_markup(combined, tu.targets[0])]
         else:
             tu.targets = [
                 _decode_serialized_markup(
@@ -589,9 +577,7 @@ async def _run_translation_async(
                         raise
                     wait = (2**server_error_retries) + random.uniform(0, 1)
                     label = (
-                        "Timeout"
-                        if _is_timeout(e)
-                        else f"Server error {e.status_code}"
+                        "Timeout" if _is_timeout(e) else f"Server error {e.status_code}"
                     )
                     console.print(
                         f"\n[yellow]{label}. Retrying in {wait:.1f}s "
@@ -770,9 +756,7 @@ def translate_po(
     untranslated = _order_units(untranslated, order)
 
     plural_tags = (
-        po_file.get_plural_tags()
-        if hasattr(po_file, "get_plural_tags")
-        else None
+        po_file.get_plural_tags() if hasattr(po_file, "get_plural_tags") else None
     )
 
     _run_translation(
