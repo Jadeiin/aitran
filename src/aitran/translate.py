@@ -233,7 +233,6 @@ class PoTranslator:
 class XliffTranslator:
     """Handles XLIFF file parsing, filtering, and output."""
 
-    _XLIFF_NS = "{urn:oasis:names:tc:xliff:document:1.2}"
     _DONE_STATES: ClassVar[set[str]] = {"final", "signed-off", "translated"}
 
     @staticmethod
@@ -241,13 +240,29 @@ class XliffTranslator:
         """Parse an XLIFF file from disk.
 
         Returns:
-            Parsed XLIFF file object.
+            Parsed XLIFF file object.  Files containing gettext plural
+            groups (``restype="x-gettext-plurals"``) are automatically
+            re-parsed as ``PoXliffFile`` so plural units are exposed
+            correctly, even when the ``datatype`` is not ``"po"``.
         """
-        return xliff.xlifffile.parsefile(path)
+        from translate.storage import poxliff
+
+        xlf = xliff.xlifffile.parsefile(path)
+        if isinstance(xlf, poxliff.PoXliffFile):
+            return xlf
+        # Detect gettext plural groups that the default parser missed.
+        ns = xlf.namespace
+        groups = xlf.document.getroot().iterdescendants(
+            f"{{{ns}}}group" if ns else "group"
+        )
+        if any(g.get("restype") == "x-gettext-plurals" for g in groups):
+            return poxliff.PoXliffFile.parsestring(bytes(xlf))
+        return xlf
 
     @staticmethod
     def _get_state(unit: xliff.xliffunit) -> str:
-        target_elem = unit.xmlelement.find(f"{XliffTranslator._XLIFF_NS}target")
+        tag = unit.namespaced("target")
+        target_elem = unit.xmlelement.find(tag)
         if target_elem is not None:
             return target_elem.get("state", "")
         return ""
@@ -586,9 +601,10 @@ async def _run_translation_async(
                 await _flush_batch()
             batch.append(unit)
 
-    # Flush remaining units
-    if batch:
-        await _flush_batch()
+        # Flush remaining units inside the progress context so the
+        # final batch's streaming updates are rendered.
+        if batch:
+            await _flush_batch()
 
 
 def _run_translation(
@@ -848,6 +864,10 @@ def translate_xliff_file(
 
     untranslated = _order_units(untranslated, order)
 
+    plural_tags = (
+        xlf.get_plural_tags() if hasattr(xlf, "get_plural_tags") else None
+    )
+
     _run_translation(
         store=xlf,
         units=untranslated,
@@ -865,6 +885,7 @@ def translate_xliff_file(
         temperature=temperature,
         progress=progress,
         profile=profile,
+        plural_tags=plural_tags,
     )
 
 

@@ -705,7 +705,7 @@ def test_xliff_apply_batch_clean_state():
 # ── PoXliff plural support ──────────────────────────────────────────
 
 
-_POXLIFF_PLURAL_XML = """\
+_POXLIFF_PLURAL_XML = b"""\
 <?xml version="1.0" encoding="UTF-8"?>
 <xliff version="1.1" xmlns="urn:oasis:names:tc:xliff:document:1.1"
        datatype="po" source-language="en" target-language="ar">
@@ -748,7 +748,7 @@ _POXLIFF_PLURAL_XML = """\
     </body>
   </file>
 </xliff>
-""".encode()
+"""
 
 
 def test_poxliff_get_untranslated_plural():
@@ -824,6 +824,47 @@ def test_poxliff_apply_review_batch_plural_auto_fix():
     # form 0 gets the correction; form 1 is preserved (empty)
     assert targets[0] == "corrected item"
     assert targets[1] == ""
+
+
+_PLAINTEXT_POXLIFF_XML = b"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.1" xmlns="urn:oasis:names:tc:xliff:document:1.1">
+  <file original="NoName" source-language="en"
+        datatype="plaintext" target-language="de">
+    <body>
+      <trans-unit xml:space="preserve" id="aaa">
+        <source>Hello</source>
+        <target state="translated">Hallo</target>
+      </trans-unit>
+      <group restype="x-gettext-plurals" xml:space="preserve" id="bbb">
+        <trans-unit xml:space="preserve" id="bbb[0]">
+          <source>%d item</source>
+          <target state="translated">Eintrag</target>
+        </trans-unit>
+        <trans-unit xml:space="preserve" id="bbb[1]">
+          <source>%d items</source>
+          <target state="translated">Eintraege</target>
+        </trans-unit>
+      </group>
+    </body>
+  </file>
+</xliff>
+"""
+
+
+def test_xliff_parse_auto_detects_poxliff_from_plaintext_datatype(tmp_path):
+    from translate.storage import poxliff
+
+    xlf_path = tmp_path / "test.xlf"
+    xlf_path.write_bytes(_PLAINTEXT_POXLIFF_XML)
+    xlf = XliffTranslator.parse(str(xlf_path))
+    assert isinstance(xlf, poxliff.PoXliffFile)
+    # The plural group should be a single PoXliffUnit with hasplural()=True
+    plural_units = [u for u in xlf.units if u.hasplural()]
+    assert len(plural_units) == 1
+    assert plural_units[0].xmlelement.get("id") == "bbb"
+    sources = plural_units[0].source.strings
+    assert sources == ["%d item", "%d items"]
 
 
 # ── build_model ────────────────────────────────────────────────────
