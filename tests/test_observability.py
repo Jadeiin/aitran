@@ -42,3 +42,40 @@ def test_setup_logfire_configures_pydantic_ai(monkeypatch):
         ("instrument_httpx", {"capture_all": True}),
         ("force_flush", {}),
     ]
+
+
+def test_setup_mlflow_disabled_does_nothing():
+    assert observability.setup_mlflow(enabled=False) is False
+
+
+def test_setup_mlflow_configures_pydantic_ai(monkeypatch):
+    calls = []
+
+    fake_pydantic_ai = SimpleNamespace(
+        autolog=lambda: calls.append(("pydantic_ai.autolog", {})),
+    )
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda uri: calls.append(("set_tracking_uri", uri)),
+        set_experiment=lambda name: calls.append(("set_experiment", name)),
+        pydantic_ai=fake_pydantic_ai,
+        flush_artifacts=lambda: calls.append(("flush_artifacts", {})),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "mlflow", fake_mlflow)
+    monkeypatch.setattr(observability, "_MLFLOW_CONFIGURED", False)
+
+    assert (
+        observability.setup_mlflow(
+            enabled=True,
+            tracking_uri="http://localhost:5000",
+            experiment="aitran",
+        )
+        is True
+    )
+    observability.flush_mlflow(enabled=True)
+
+    assert calls == [
+        ("set_tracking_uri", "http://localhost:5000"),
+        ("set_experiment", "aitran"),
+        ("pydantic_ai.autolog", {}),
+        ("flush_artifacts", {}),
+    ]

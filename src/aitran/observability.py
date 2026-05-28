@@ -4,6 +4,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 _LOGFIRE_CONFIGURED = False
 _LOGFIRE_HTTPX_INSTRUMENTED = False
+_MLFLOW_CONFIGURED = False
 
 
 class ObservabilityError(RuntimeError):
@@ -71,3 +72,58 @@ def flush_logfire(*, enabled: bool) -> None:
         return
 
     logfire.force_flush()
+
+
+def setup_mlflow(
+    *,
+    enabled: bool,
+    tracking_uri: str | None = None,
+    experiment: str | None = None,
+) -> bool:
+    """Configure MLflow tracing for pydantic-ai.
+
+    Args:
+        enabled: Whether MLflow tracing should be configured.
+        tracking_uri: Optional MLflow tracking server URI.
+        experiment: Optional MLflow experiment name.
+
+    Returns:
+        True when MLflow was enabled, otherwise False.
+
+    Raises:
+        ObservabilityError: If MLflow is not installed.
+    """
+    global _MLFLOW_CONFIGURED
+
+    if not enabled:
+        return False
+
+    try:
+        import mlflow
+    except ImportError as exc:
+        raise ObservabilityError(
+            "MLflow is not installed. Install it with `pip install mlflow>=3.1`."
+        ) from exc
+
+    if not _MLFLOW_CONFIGURED:
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
+        if experiment:
+            mlflow.set_experiment(experiment)
+        mlflow.pydantic_ai.autolog()
+        _MLFLOW_CONFIGURED = True
+
+    return True
+
+
+def flush_mlflow(*, enabled: bool) -> None:
+    """Flush pending MLflow traces before CLI process exit."""
+    if not enabled:
+        return
+
+    try:
+        import mlflow
+    except ImportError:
+        return
+
+    mlflow.flush_artifacts()

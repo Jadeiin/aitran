@@ -15,7 +15,13 @@ from aitran.crowdin import list_languages as crowdin_list_languages
 from aitran.crowdin import list_projects as crowdin_list_projects
 from aitran.crowdin import upload_translation as crowdin_upload_translation
 from aitran.manipulate import remove_by_options
-from aitran.observability import ObservabilityError, flush_logfire, setup_logfire
+from aitran.observability import (
+    ObservabilityError,
+    flush_logfire,
+    flush_mlflow,
+    setup_logfire,
+    setup_mlflow,
+)
 from aitran.review import review_po, review_xliff
 from aitran.sync import sync
 from aitran.translate import (
@@ -256,6 +262,25 @@ def app() -> None:
         "This may include prompts, completions, and credentials."
     ),
 )
+@click.option(
+    "--mlflow",
+    is_flag=True,
+    envvar="AITRAN_MLFLOW",
+    help=(
+        "Enable MLflow tracing for agent/model runs. "
+        "Prompts and completions may be logged to MLflow."
+    ),
+)
+@click.option(
+    "--mlflow-tracking-uri",
+    envvar="AITRAN_MLFLOW_TRACKING_URI",
+    help="MLflow tracking server URI (defaults to local ./mlruns).",
+)
+@click.option(
+    "--mlflow-experiment",
+    envvar="AITRAN_MLFLOW_EXPERIMENT",
+    help="MLflow experiment name (defaults to 'Default').",
+)
 def translate(
     model: str,
     key: str | None,
@@ -276,6 +301,9 @@ def translate(
     output: str | None,
     logfire: bool,
     logfire_capture_http: bool,
+    mlflow: bool,
+    mlflow_tracking_uri: str | None,
+    mlflow_experiment: str | None,
 ) -> None:
     """Translate PO/XLIFF files.
 
@@ -301,6 +329,15 @@ def translate(
         logfire_enabled = setup_logfire(
             enabled=logfire,
             capture_http=logfire_capture_http,
+        )
+    except ObservabilityError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        mlflow_enabled = setup_mlflow(
+            enabled=mlflow,
+            tracking_uri=mlflow_tracking_uri,
+            experiment=mlflow_experiment,
         )
     except ObservabilityError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -355,6 +392,7 @@ def translate(
             sys.exit(1)
     finally:
         flush_logfire(enabled=logfire_enabled)
+        flush_mlflow(enabled=mlflow_enabled)
 
 
 @app.command(
