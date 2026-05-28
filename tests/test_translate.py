@@ -777,7 +777,8 @@ def test_poxliff_apply_batch_plural():
         [unit],
         [
             TranslatedUnit(
-                index=0, targets=["one file translated", "many files translated"],
+                index=0,
+                targets=["one file translated", "many files translated"],
                 fuzzy=False,
             ),
         ],

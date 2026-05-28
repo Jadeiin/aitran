@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from aitran.qa.checkers import CATEGORY_LABELS, TeeChecker, build_checker
+
+Severity = Literal["critical", "functional", "cosmetic", "extraction", "other"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,7 +20,7 @@ class QAError:
     message: str
     """Human-readable description of the failure."""
 
-    severity: str
+    severity: Severity
     """``"critical"``, ``"functional"``, ``"cosmetic"``, or ``"extraction"``."""
 
 
@@ -79,11 +82,12 @@ class QARunner:
         errors: list[QAError] = []
         for check_name, info in failures.items():
             cat: int = info.get("category", 0)
+            severity: Severity = CATEGORY_LABELS.get(cat, "other")  # type: ignore[assignment]
             errors.append(
                 QAError(
                     checker=check_name,
                     message=str(info.get("message", "")),
-                    severity=CATEGORY_LABELS.get(cat, "other"),
+                    severity=severity,
                 )
             )
         return UnitQAReport(index=index, errors=errors)

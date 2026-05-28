@@ -1,6 +1,6 @@
 """Optional observability integrations for translation runs."""
 
-from importlib.metadata import PackageNotFoundError, version
+from aitran.utils import aitran_version
 
 _LOGFIRE_CONFIGURED = False
 _LOGFIRE_HTTPX_INSTRUMENTED = False
@@ -9,13 +9,6 @@ _MLFLOW_CONFIGURED = False
 
 class ObservabilityError(RuntimeError):
     """Raised when an observability backend cannot be configured."""
-
-
-def _service_version() -> str:
-    try:
-        return version("aitran")
-    except PackageNotFoundError:
-        return "unknown"
 
 
 def setup_logfire(*, enabled: bool, capture_http: bool = False) -> bool:
@@ -47,7 +40,7 @@ def setup_logfire(*, enabled: bool, capture_http: bool = False) -> bool:
     if not _LOGFIRE_CONFIGURED:
         logfire.configure(
             service_name="aitran",
-            service_version=_service_version(),
+            service_version=aitran_version(),
             send_to_logfire="if-token-present",
             console=False,
         )

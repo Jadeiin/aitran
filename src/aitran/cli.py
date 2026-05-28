@@ -22,7 +22,7 @@ from aitran.observability import (
     setup_logfire,
     setup_mlflow,
 )
-from aitran.review import review_po, review_xliff
+from aitran.review import review_file
 from aitran.sync import sync
 from aitran.translate import (
     translate_po,
@@ -512,34 +512,20 @@ def review(
         raise click.ClickException(str(exc)) from exc
 
     try:
-        if po_file:
-            summary = review_po(
-                model=model,
-                po_path=po_file,
-                source_lang=source,
-                target_lang=lang or "",
-                output_path=output or po_file,
-                batch_size=batch_size,
-                strict=strict,
-                auto_fix=auto_fix,
-                api_key=key,
-                api_host=host,
-                temperature=temperature,
-            )
-        else:
-            summary = review_xliff(
-                model=model,
-                xliff_path=xliff_file,
-                source_lang=source,
-                target_lang=lang or "",
-                output_path=output or xliff_file,
-                batch_size=batch_size,
-                strict=strict,
-                auto_fix=auto_fix,
-                api_key=key,
-                api_host=host,
-                temperature=temperature,
-            )
+        review_path: str = po_file or xliff_file  # guaranteed by mutual-exclusion check
+        summary = review_file(
+            model=model,
+            path=review_path,
+            source_lang=source,
+            target_lang=lang or "",
+            output_path=output or review_path,
+            batch_size=batch_size,
+            strict=strict,
+            auto_fix=auto_fix,
+            api_key=key,
+            api_host=host,
+            temperature=temperature,
+        )
     finally:
         flush_logfire(enabled=logfire_enabled)
 

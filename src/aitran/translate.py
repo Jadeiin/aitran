@@ -7,7 +7,6 @@ import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
-from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, ClassVar
 
 from pydantic_ai.exceptions import UnexpectedModelBehavior
@@ -26,6 +25,7 @@ from aitran.agents import (
 )
 from aitran.agents._base import fmt_base_url, safe_prompt_text
 from aitran.dicts import find_matching_entries
+from aitran.utils import aitran_version
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -38,6 +38,18 @@ _LEGACY_LANGUAGE_CODES = {
     "zh_Hans_SG": "zh_SG",
     "zh_Hant_HK": "zh_HK",
 }
+
+
+def _multistring(value) -> list[str]:
+    """Extract all forms from a translate-toolkit string value.
+
+    Returns:
+        A list of strings — one per plural form for multistrings, or a
+        single-element list for plain strings.
+    """
+    if hasattr(value, "strings"):
+        return [str(s) for s in value.strings]
+    return [str(value)]
 
 
 _XML_ENTITY_CODEPOINTS = {
@@ -71,11 +83,7 @@ def _read_context(context_file: str | None) -> str:
 
 
 def _last_translator() -> str:
-    try:
-        package_version = version("aitran")
-    except PackageNotFoundError:
-        package_version = "unknown"
-    return f"aitran v{package_version}"
+    return f"aitran v{aitran_version()}"
 
 
 def _build_progress(console: Console | None = None) -> Progress:
@@ -137,11 +145,7 @@ class PoTranslator:
                 # istranslated only checks singular form;
                 # verify all plural forms are present and non-empty.
                 if unit.hasplural() and len(plural_tags) > 1:
-                    targets = (
-                        unit.target.strings
-                        if hasattr(unit.target, "strings")
-                        else [unit.target]
-                    )
+                    targets = _multistring(unit.target)
                     if len(targets) < len(plural_tags) or any(
                         not t.strip() for t in targets
                     ):
@@ -197,11 +201,7 @@ class PoTranslator:
                     safe_prompt_text(result.corrected),
                 )
                 if unit.hasplural():
-                    existing = (
-                        unit.target.strings
-                        if hasattr(unit.target, "strings")
-                        else [str(unit.target)]
-                    )
+                    existing = _multistring(unit.target)
                     forms = [corrected, *existing[1:]]
                     unit.target = po.pounit.sync_plural_count(
                         multistring(forms),
@@ -287,11 +287,7 @@ class XliffTranslator:
 
             # Plural units: check all forms individually.
             if unit.hasplural() and len(plural_tags) > 1:
-                targets = (
-                    unit.target.strings
-                    if hasattr(unit.target, "strings")
-                    else [str(unit.target or "")]
-                )
+                targets = _multistring(unit.target or "")
                 if len(targets) < len(plural_tags) or any(
                     not t.strip() for t in targets
                 ):
@@ -359,11 +355,7 @@ class XliffTranslator:
                     safe_prompt_text(result.corrected),
                 )
                 if unit.hasplural():
-                    existing = (
-                        unit.target.strings
-                        if hasattr(unit.target, "strings")
-                        else [str(unit.target)]
-                    )
+                    existing = _multistring(unit.target)
                     unit.settarget(multistring([corrected, *existing[1:]]))
                     unit.markfuzzy(True)
                 else:
@@ -442,7 +434,7 @@ async def _translate_batch(
         # Reverse XML escaping applied by format_as_xml only when the source
         # had raw markup. Already-escaped source strings must remain escaped.
         raw = units[i].source
-        source_strings = raw.strings if hasattr(raw, "strings") else [str(raw)]
+        source_strings = _multistring(raw)
         if (
             len(tu.targets) == 1
             and len(source_strings) > 1
@@ -864,9 +856,7 @@ def translate_xliff_file(
 
     untranslated = _order_units(untranslated, order)
 
-    plural_tags = (
-        xlf.get_plural_tags() if hasattr(xlf, "get_plural_tags") else None
-    )
+    plural_tags = xlf.get_plural_tags() if hasattr(xlf, "get_plural_tags") else None
 
     _run_translation(
         store=xlf,

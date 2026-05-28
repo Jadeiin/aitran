@@ -4,8 +4,21 @@ import os
 import platform
 import shutil
 import subprocess
+from importlib.metadata import PackageNotFoundError, version
 
 import platformdirs
+
+
+def aitran_version() -> str:
+    """Return the installed aitran version string.
+
+    Returns:
+        Version string, or ``"unknown"`` if the package metadata is missing.
+    """
+    try:
+        return version("aitran")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def normalize_lang_code(lang: str) -> str:

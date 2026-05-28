@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 from aitran import observability
+from aitran.utils import aitran_version
 
 
 def test_setup_logfire_disabled_does_nothing():
@@ -33,7 +34,7 @@ def test_setup_logfire_configures_pydantic_ai(monkeypatch):
             "configure",
             {
                 "service_name": "aitran",
-                "service_version": observability._service_version(),
+                "service_version": aitran_version(),
                 "send_to_logfire": "if-token-present",
                 "console": False,
             },

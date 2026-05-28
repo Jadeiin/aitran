@@ -5,11 +5,12 @@ for the LLM reviewer to consume as context.
 """
 
 from aitran.qa.checkers import build_checker
-from aitran.qa.runner import QAError, QARunner, UnitQAReport
+from aitran.qa.runner import QAError, QARunner, Severity, UnitQAReport
 
 __all__ = [
     "QAError",
     "QARunner",
+    "Severity",
     "UnitQAReport",
     "build_checker",
 ]

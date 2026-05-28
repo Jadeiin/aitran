@@ -59,6 +59,36 @@ def _filter_review_units(
     return filtered_reports, filtered_units
 
 
+def _pre_filter_by_markers(
+    units: list,
+    *,
+    start_index: int,
+) -> tuple[list[UnitQAReport], list, list[int]]:
+    """Split units into fuzzy/note-marked candidates and the rest.
+
+    Units with fuzzy flags or translator notes are always review-worthy
+    without running expensive QA checks.  The remaining indices need QA.
+
+    Returns:
+        Tuple of (reports, units, indices_needing_qa) — the first two lists
+        contain units that bypass QA; the third is 1-based indices of units
+        that still need QA checks.
+    """
+    marked_reports: list[UnitQAReport] = []
+    marked_units: list = []
+    qa_indices: list[int] = []
+    for i, u in enumerate(units):
+        idx = start_index + i
+        is_fuzzy = getattr(u, "isfuzzy", lambda: False)()
+        has_notes = bool(getattr(u, "getnotes", lambda: "")().strip())
+        if is_fuzzy or has_notes:
+            marked_reports.append(UnitQAReport(index=idx))
+            marked_units.append(u)
+        else:
+            qa_indices.append(idx)
+    return marked_reports, marked_units, qa_indices
+
+
 async def _review_chunk(
     agent,
     units: list,
@@ -129,12 +159,28 @@ async def _run_review_async(
     owns_progress = progress is None
     progress = progress or _build_progress()
 
-    # Global QA + filtering: only review-worthy units go to the agent
+    # In non-strict mode, pre-filter by fuzzy/notes markers (cheap) before
+    # running expensive QA checks — only units without markers need QA.
     qa_runner = QARunner(target_lang=target_lang)
-    qa_reports = qa_runner.check_units(units, start_index=1)
-    review_reports, review_units = _filter_review_units(
-        units, qa_reports, start_index=1, strict=strict
-    )
+    if strict:
+        qa_reports = qa_runner.check_units(units, start_index=1)
+        review_reports, review_units = _filter_review_units(
+            units, qa_reports, start_index=1, strict=True
+        )
+    else:
+        marked_reports, marked_units, qa_indices = _pre_filter_by_markers(
+            units, start_index=1
+        )
+        if qa_indices:
+            qa_units = [units[idx - 1] for idx in qa_indices]
+            qa_reports = qa_runner.check_units(qa_units, start_index=qa_indices[0])
+            qa_only_reports = [r for r in qa_reports if r.has_errors]
+            qa_only_units = [units[r.index - 1] for r in qa_only_reports]
+        else:
+            qa_only_reports = []
+            qa_only_units = []
+        review_reports = marked_reports + qa_only_reports
+        review_units = marked_units + qa_only_units
     review_count = len(review_units)
     total_count = len(units)
 
@@ -241,9 +287,9 @@ def build_default_reviewer(
     return build_reviewer_agent(model)
 
 
-def review_po(
+def review_file(
     model: str,
-    po_path: str,
+    path: str,
     source_lang: str,
     target_lang: str,
     output_path: str,
@@ -255,96 +301,60 @@ def review_po(
     api_host: str | None = None,
     temperature: float = 0.1,
 ) -> dict[str, int]:
-    """Review a single PO file.
+    """Review a single PO or XLIFF file.
 
     Returns:
         Summary counts: ``{"pass": N, "revise": N, "reject": N}``.
     """
-    from aitran.translate import PoTranslator
+    from aitran.translate import PoTranslator, XliffTranslator
 
-    translator = PoTranslator()
-    po_file = translator.parse(po_path)
+    empty = {"pass": 0, "revise": 0, "reject": 0}
+    is_po = path.endswith((".po", ".pot"))
 
-    if not target_lang:
-        inferred_lang = translator.get_target_language(po_file)
-        if inferred_lang:
-            target_lang = inferred_lang
-    if not target_lang:
-        print(
-            "No target language specified via --lang or PO header",
-            file=sys.stderr,
-        )
-        return {"pass": 0, "revise": 0, "reject": 0}
+    if is_po:
+        translator = PoTranslator()
+        store = translator.parse(path)
 
-    units = [u for u in po_file.units if u.source and not u.isheader() and u.target]
+        if not target_lang:
+            inferred_lang = translator.get_target_language(store)
+            if inferred_lang:
+                target_lang = inferred_lang
+        if not target_lang:
+            print(
+                "No target language specified via --lang or PO header",
+                file=sys.stderr,
+            )
+            return empty
+
+        src = source_lang
+        units = [u for u in store.units if u.source and not u.isheader() and u.target]
+    else:
+        translator = XliffTranslator()
+        store = translator.parse(path)
+
+        if not target_lang:
+            target_lang = store.targetlanguage or ""
+        if not target_lang:
+            print(
+                "No target language specified via --lang or XLIFF header",
+                file=sys.stderr,
+            )
+            return empty
+
+        src = source_lang or store.sourcelanguage or "en"
+        units = [
+            u
+            for u in store.units
+            if (u.source or "").strip() and (u.target or "").strip()
+        ]
+
     if not units:
         print("No translated entries to review.")
-        return {"pass": 0, "revise": 0, "reject": 0}
+        return empty
 
     return asyncio.run(
         _run_review_async(
-            store=po_file,
-            units=units,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            model_spec=model,
-            translator=translator,
-            output_path=output_path,
-            batch_size=batch_size,
-            auto_fix=auto_fix,
-            strict=strict,
-            api_key=api_key,
-            api_host=api_host,
-            temperature=temperature,
-        )
-    )
-
-
-def review_xliff(
-    model: str,
-    xliff_path: str,
-    source_lang: str,
-    target_lang: str,
-    output_path: str,
-    batch_size: int,
-    *,
-    strict: bool = False,
-    auto_fix: bool = False,
-    api_key: str | None = None,
-    api_host: str | None = None,
-    temperature: float = 0.1,
-) -> dict[str, int]:
-    """Review a single XLIFF file.
-
-    Returns:
-        Summary counts: ``{"pass": N, "revise": N, "reject": N}``.
-    """
-    from aitran.translate import XliffTranslator
-
-    translator = XliffTranslator()
-    xlf = translator.parse(xliff_path)
-
-    if not target_lang:
-        target_lang = xlf.targetlanguage or ""
-    if not target_lang:
-        print(
-            "No target language specified via --lang or XLIFF header",
-            file=sys.stderr,
-        )
-        return {"pass": 0, "revise": 0, "reject": 0}
-
-    src = source_lang or xlf.sourcelanguage or "en"
-
-    units = [
-        u for u in xlf.units if (u.source or "").strip() and (u.target or "").strip()
-    ]
-    if not units:
-        print("No translated entries to review.")
-        return {"pass": 0, "revise": 0, "reject": 0}
-
-    return asyncio.run(
-        _run_review_async(
-            store=xlf,
+            store=store,
             units=units,
             source_lang=src,
             target_lang=target_lang,
