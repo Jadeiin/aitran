@@ -6,9 +6,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelRetry
+from pydantic_ai import Agent, ModelRetry, format_as_xml
 
-from aitran.agents._base import format_language_label
+from aitran.agents._base import (
+    build_unit_prompt_fields,
+    format_language_label,
+    safe_prompt_text,
+)
 
 if TYPE_CHECKING:
     from pydantic_ai import RunContext
@@ -121,6 +125,67 @@ class TranslationDeps:
     dict_entries: list[tuple[str, str]]
     expected_indices: tuple[int, ...]
     plural_tags: list[str] | None = None
+
+
+def build_translation_input_xml(
+    units: list,
+    start_index: int,
+    *,
+    profile: str = "full",
+    plural_tags: list[str] | None = None,
+) -> str:
+    """Format translation units as XML for the translator agent.
+
+    Only non-empty fields are included per unit. Metadata is read through
+    Translate Toolkit's standard unit APIs so the same code works for PO and
+    XLIFF.
+
+    Returns:
+        XML string with a root ``<translate-batch>`` element.
+    """
+    items: list[dict] = []
+    for i, unit in enumerate(units):
+        d = build_unit_prompt_fields(
+            unit,
+            start_index + i,
+            plural_tags=plural_tags,
+        )
+
+        if profile == "fast":
+            items.append(d)
+            continue
+
+        getctx = getattr(unit, "getcontext", None)
+        if callable(getctx):
+            ctx = getctx()
+            if ctx:
+                d["context"] = safe_prompt_text(ctx)
+
+        locs = getattr(unit, "getlocations", None)
+        if callable(locs) and locs():
+            d["location"] = safe_prompt_text(", ".join(locs()))
+
+        notes = getattr(unit, "getnotes", None)
+        if callable(notes):
+            note_text = notes().strip()
+            if note_text:
+                d["note"] = safe_prompt_text(note_text)
+
+        typecomments = getattr(unit, "typecomments", None)
+        if typecomments:
+            if isinstance(typecomments, list):
+                typecomments = ", ".join(typecomments)
+            clean = (
+                f.strip().removeprefix("#,").removeprefix("#").strip(" ,")
+                for f in str(typecomments).split(",")
+            )
+            flags = [f for f in clean if f]
+            if flags:
+                d["flag"] = safe_prompt_text(", ".join(flags))
+
+        items.append(d)
+
+    return format_as_xml(items, root_tag="translate-batch", item_tag="translate")
 
 
 def build_translator_agent(model: Model) -> Agent[TranslationDeps, TranslationBatch]:

@@ -17,8 +17,8 @@ from translate.storage import po
 from aitran.agents import (
     TranslatedUnit,
     TranslationDeps,
-    build_input_xml,
     build_model,
+    build_translation_input_xml,
     build_translator_agent,
 )
 from aitran.translate import (
@@ -59,43 +59,43 @@ def _make_deps(expected_indices=(1, 2), plural_tags=None):
     )
 
 
-# ── build_input_xml ──────────────────────────────────────────────
+# ── build_translation_input_xml ──────────────────────────────────────────────
 
 
-def test_build_input_xml_basic():
+def test_build_translation_input_xml_basic():
     units = [FakeUnit("Hello"), FakeUnit("World")]
-    xml = build_input_xml(units, start_index=1)
+    xml = build_translation_input_xml(units, start_index=1)
     assert "<translate-batch>" in xml
     assert "</translate-batch>" in xml
     assert "<index>1</index>" in xml and "<source>Hello</source>" in xml
     assert "<index>2</index>" in xml and "<source>World</source>" in xml
 
 
-def test_build_input_xml_with_context():
+def test_build_translation_input_xml_with_context():
     units = [FakeUnit("File", context="Menu", _note="top-level")]
-    xml = build_input_xml(units, start_index=5)
+    xml = build_translation_input_xml(units, start_index=5)
     assert "<index>5</index>" in xml
     assert "<context>Menu</context>" in xml
     assert "<note>top-level</note>" in xml
 
 
-def test_build_input_xml_omits_none_fields():
+def test_build_translation_input_xml_omits_none_fields():
     units = [FakeUnit("Plain")]
-    xml = build_input_xml(units, start_index=1)
+    xml = build_translation_input_xml(units, start_index=1)
     assert "context" not in xml
     assert "comment" not in xml
     assert "null" not in xml
 
 
-def test_build_input_xml_strips_invalid_xml_characters():
+def test_build_translation_input_xml_strips_invalid_xml_characters():
     units = [FakeUnit("Hello \x08 world")]
-    xml = build_input_xml(units, start_index=1)
+    xml = build_translation_input_xml(units, start_index=1)
     assert "\x08" not in xml
     assert "Hello  world" in xml
     xml_helpers.parse_xml(xml)
 
 
-def test_build_input_xml_preserves_escaped_markup_after_sanitizing():
+def test_build_translation_input_xml_preserves_escaped_markup_after_sanitizing():
     units = [
         FakeUnit(
             'Click <a href="/docs?a=1&b=2">docs</a><br/><code>x & y</code>\x08',
@@ -103,7 +103,7 @@ def test_build_input_xml_preserves_escaped_markup_after_sanitizing():
             _note="Keep <code>, <a>, and <br/> tags.",
         )
     ]
-    xml = build_input_xml(units, start_index=1)
+    xml = build_translation_input_xml(units, start_index=1)
 
     assert "\x08" not in xml
     assert '&lt;a href="/docs?a=1&amp;b=2"&gt;docs&lt;/a&gt;' in xml
@@ -680,7 +680,7 @@ def test_agent_instructions_inject_glossary():
     agent = build_translator_agent(model)
     with agent.override(model=model):
         agent.run_sync(
-            build_input_xml([FakeUnit("login")], start_index=1),
+            build_translation_input_xml([FakeUnit("login")], start_index=1),
             deps=deps,
         )
 
@@ -716,7 +716,7 @@ def test_agent_instructions_reject_ambiguous_language_code():
         pytest.raises(ValueError, match="Unknown or ambiguous language code"),
     ):
         agent.run_sync(
-            build_input_xml([FakeUnit("login")], start_index=1),
+            build_translation_input_xml([FakeUnit("login")], start_index=1),
             deps=deps,
         )
 
@@ -1068,7 +1068,7 @@ class FakePluralUnit:
         return self._note or ""
 
 
-def test_build_input_xml_plural_units():
+def test_build_translation_input_xml_plural_units():
     """Plural units should include sources and plural_tags."""
     units = [
         FakePluralUnit(
@@ -1078,17 +1078,21 @@ def test_build_input_xml_plural_units():
             ])
         ),
     ]
-    xml = build_input_xml(units, start_index=1, plural_tags=["one", "other"])
+    xml = build_translation_input_xml(
+        units, start_index=1, plural_tags=["one", "other"]
+    )
     assert "{0} result" in xml
     assert "{0} results" in xml
     assert "<sources>" in xml
     assert "plural_tags" not in xml
 
 
-def test_build_input_xml_singular_no_plural_tags():
+def test_build_translation_input_xml_singular_no_plural_tags():
     """Singular units should not include plural_tags."""
     units = [FakeUnit("Hello")]
-    xml = build_input_xml(units, start_index=1, plural_tags=["one", "other"])
+    xml = build_translation_input_xml(
+        units, start_index=1, plural_tags=["one", "other"]
+    )
     assert "<source>Hello</source>" in xml
     assert "plural_tags" not in xml
     assert "sources" not in xml
@@ -1109,9 +1113,7 @@ async def test_translate_batch_handles_plural_targets():
     )
     agent = build_translator_agent(model)
     units = [
-        FakePluralUnit(
-            source=multistring(["{0} result", "{0} results"])
-        ),
+        FakePluralUnit(source=multistring(["{0} result", "{0} results"])),
     ]
     with agent.override(model=model):
         results = await _translate_batch(

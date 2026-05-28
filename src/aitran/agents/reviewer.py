@@ -6,13 +6,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelRetry
+from pydantic_ai import Agent, ModelRetry, format_as_xml
 
-from aitran.agents._base import format_language_label
+from aitran.agents._base import build_unit_prompt_fields, format_language_label
 
 if TYPE_CHECKING:
     from pydantic_ai import RunContext
     from pydantic_ai.models import Model
+
+    from aitran.qa import UnitQAReport
 
 # ---------------------------------------------------------------------------
 # Prompts
@@ -112,6 +114,35 @@ class ReviewDeps:
     target_lang: str
     context: str
     expected_indices: tuple[int, ...]
+
+
+def build_review_input_xml(
+    units: list,
+    qa_reports: list[UnitQAReport],
+) -> str:
+    """Build XML input for the reviewer agent.
+
+    Each unit includes source, target, and any QA errors. Plural units use
+    ``sources`` and ``targets`` list fields so all forms are visible.
+
+    Returns:
+        XML string with a root ``<review-batch>`` element.
+    """
+    items: list[dict] = []
+    for unit, report in zip(units, qa_reports, strict=True):
+        d = build_unit_prompt_fields(
+            unit,
+            report.index,
+            include_target=True,
+            force_plural=True,
+        )
+        if report.has_errors:
+            d["qa-errors"] = "; ".join(
+                f"[{e.severity}] {e.checker}: {e.message}" for e in report.errors
+            )
+        items.append(d)
+
+    return format_as_xml(items, root_tag="review-batch", item_tag="unit")
 
 
 # ---------------------------------------------------------------------------

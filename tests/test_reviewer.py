@@ -1,13 +1,20 @@
 """Tests for the reviewer agent."""
 
 from pydantic_ai.models.test import TestModel
+from translate.storage.po import pofile
 
 from aitran.agents.reviewer import (
     ReviewBatch,
     ReviewDeps,
     ReviewedUnit,
+    build_review_input_xml,
     build_reviewer_agent,
 )
+from aitran.qa import UnitQAReport
+
+
+def _po(content: str) -> pofile:
+    return pofile.parsestring(content.encode())
 
 
 class TestReviewedUnit:
@@ -66,3 +73,22 @@ class TestBuildReviewerAgent:
         assert len(result.output.units) == 2
         assert result.output.units[0].verdict == "revise"
         assert result.output.units[0].corrected == "fix"
+
+
+class TestBuildReviewInputXml:
+    def test_plural_units_include_all_source_and_target_forms(self):
+        po = _po(
+            "#: src/a.py:1\n"
+            'msgid "apple %d"\n'
+            'msgid_plural "apples %d"\n'
+            'msgstr[0] "苹果 %d"\n'
+            'msgstr[1] "苹果们"\n'
+        )
+        xml = build_review_input_xml([po.units[0]], [UnitQAReport(index=1)])
+
+        assert "apple %d" in xml
+        assert "apples %d" in xml
+        assert "苹果 %d" in xml
+        assert "苹果们" in xml
+        assert "sources" in xml
+        assert "targets" in xml

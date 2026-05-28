@@ -14,6 +14,7 @@ from aitran.agents import (
     ReviewDeps,
     ReviewedUnit,
     build_model,
+    build_review_input_xml,
     build_reviewer_agent,
 )
 from aitran.qa import QARunner, UnitQAReport
@@ -40,38 +41,6 @@ def _build_progress(console: Console | None = None) -> Progress:
     )
     progress.live.vertical_overflow = "crop"
     return progress
-
-
-def _build_review_input_xml(
-    units: list,
-    qa_reports: list[UnitQAReport],
-) -> str:
-    """Build XML input for the reviewer agent.
-
-    Each unit includes source, target, and any QA errors.
-    Units and qa_reports are parallel lists with matching indices.
-
-    Returns:
-        XML string for the reviewer agent prompt.
-    """
-    from pydantic_ai import format_as_xml
-
-    from aitran.agents._base import safe_prompt_text
-
-    items: list[dict] = []
-    for u, report in zip(units, qa_reports, strict=True):
-        d: dict = {
-            "index": report.index,
-            "source": safe_prompt_text(u.source),
-            "target": safe_prompt_text(u.target),
-        }
-        if report.has_errors:
-            d["qa-errors"] = "; ".join(
-                f"[{e.severity}] {e.checker}: {e.message}" for e in report.errors
-            )
-        items.append(d)
-
-    return format_as_xml(items, root_tag="review-batch", item_tag="unit")
 
 
 def _filter_review_units(
@@ -169,7 +138,7 @@ async def _run_review_async(
         Returns:
             List of ReviewedUnit with revise or reject verdicts.
         """
-        input_xml = _build_review_input_xml(chunk_units, chunk_reports)
+        input_xml = build_review_input_xml(chunk_units, chunk_reports)
         deps = ReviewDeps(
             source_lang=source_lang,
             target_lang=target_lang,

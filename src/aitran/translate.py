@@ -21,8 +21,8 @@ from translate.storage import po, xliff
 from aitran.agents import (
     ReviewedUnit,
     TranslationDeps,
-    build_input_xml,
     build_model,
+    build_translation_input_xml,
     build_translator_agent,
 )
 from aitran.dicts import find_matching_entries
@@ -362,7 +362,7 @@ async def _translate_batch(
     Returns:
         List of TranslatedUnit aligned with the input units list.
     """
-    user_msg = build_input_xml(
+    user_msg = build_translation_input_xml(
         units,
         start_index,
         profile=profile,

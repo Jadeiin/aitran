@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic_ai import format_as_xml
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers import infer_provider_class
@@ -29,6 +28,49 @@ def safe_prompt_text(value: object) -> str:
         Text with characters invalid in XML removed.
     """
     return xml_helpers.valid_chars_only(str(value))
+
+
+def prompt_texts(value: object) -> list[str]:
+    """Coerce singular or multistring text into XML-safe prompt strings.
+
+    Returns:
+        One XML-safe string per form.
+    """
+    strings = value.strings if hasattr(value, "strings") else [value]
+    return [safe_prompt_text(s) for s in strings]
+
+
+def build_unit_prompt_fields(
+    unit,
+    index: int,
+    *,
+    include_target: bool = False,
+    plural_tags: list[str] | None = None,
+    force_plural: bool = False,
+) -> dict:
+    """Build source/target prompt fields for a translation unit.
+
+    Plural units use list fields (``sources`` and optionally ``targets``).
+    Singular units use scalar fields (``source`` and optionally ``target``).
+
+    Returns:
+        Prompt-ready unit fields including ``index``.
+    """
+    has_plural = getattr(unit, "hasplural", lambda: False)()
+    use_plural_fields = has_plural and (force_plural or plural_tags is not None)
+    if use_plural_fields:
+        fields: dict = {
+            "index": index,
+            "sources": prompt_texts(unit.source),
+        }
+        if include_target:
+            fields["targets"] = prompt_texts(unit.target)
+        return fields
+
+    fields = {"index": index, "source": safe_prompt_text(unit.source)}
+    if include_target:
+        fields["target"] = safe_prompt_text(unit.target)
+    return fields
 
 
 def format_language_label(code: str) -> str:
@@ -118,82 +160,3 @@ def build_model(
         provider=provider,
         settings=ModelSettings(temperature=temperature),
     )
-
-
-def build_input_xml(
-    units: list,
-    start_index: int,
-    *,
-    profile: str = "full",
-    plural_tags: list[str] | None = None,
-) -> str:
-    """Format translation units as XML for the LLM prompt.
-
-    Only non-empty fields are included per unit.  Metadata is read through
-    :class:`~translate.storage.base.TranslationUnit` standard API methods
-    so the same code works for PO and XLIFF.
-
-    Args:
-        units: Translation units.
-        start_index: 1-based starting index for this batch.
-        profile: ``"fast"`` includes only ``index`` + ``source``;
-            ``"full"`` (default) adds ``context``, ``location``,
-            ``note``, and ``flag``.
-        plural_tags: Plural form names for the target language
-            (e.g. ``["one", "other"]``). When provided, plural units
-            include ``sources`` and ``plural_tags`` elements.
-
-    Returns:
-        XML string with a root ``<translate-batch>`` element.
-    """
-    items: list[dict] = []
-    for i, u in enumerate(units):
-        has_plural = getattr(u, "hasplural", lambda: False)()
-        if has_plural and plural_tags:
-            strings = (
-                u.source.strings
-                if hasattr(u.source, "strings")
-                else [u.source]
-            )
-            d: dict = {
-                "index": start_index + i,
-                "sources": [safe_prompt_text(s) for s in strings],
-            }
-        else:
-            d = {"index": start_index + i, "source": safe_prompt_text(u.source)}
-
-        if profile == "fast":
-            items.append(d)
-            continue
-
-        getctx = getattr(u, "getcontext", None)
-        if callable(getctx):
-            ctx = getctx()
-            if ctx:
-                d["context"] = safe_prompt_text(ctx)
-
-        locs = getattr(u, "getlocations", None)
-        if callable(locs) and locs():
-            d["location"] = safe_prompt_text(", ".join(locs()))
-
-        notes = getattr(u, "getnotes", None)
-        if callable(notes):
-            note_text = notes().strip()
-            if note_text:
-                d["note"] = safe_prompt_text(note_text)
-
-        typecomments = getattr(u, "typecomments", None)
-        if typecomments:
-            if isinstance(typecomments, list):
-                typecomments = ", ".join(typecomments)
-            clean = (
-                f.strip().removeprefix("#,").removeprefix("#").strip(" ,")
-                for f in str(typecomments).split(",")
-            )
-            flags = [f for f in clean if f]
-            if flags:
-                d["flag"] = safe_prompt_text(", ".join(flags))
-
-        items.append(d)
-
-    return format_as_xml(items, root_tag="translate-batch", item_tag="translate")
