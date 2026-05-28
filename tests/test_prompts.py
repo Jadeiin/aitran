@@ -1,17 +1,14 @@
-"""Tests for prompt loading."""
+"""Tests for prompt constants."""
 
-from aitran.prompts import load_system_prompt, load_user_prompt
+from aitran.agents.translator import SYSTEM_PROMPT, USER_PROMPT
 
 
-def test_load_prompts_nonempty():
-    sys_prompt = load_system_prompt()
-    user_prompt = load_user_prompt()
-    assert len(sys_prompt.strip()) > 0
-    assert len(user_prompt.strip()) > 0
+def test_prompts_nonempty():
+    assert len(SYSTEM_PROMPT.strip()) > 0
+    assert len(USER_PROMPT.strip()) > 0
 
 
 def test_user_prompt_describes_format():
-    user_prompt = load_user_prompt()
-    assert "translate-batch" in user_prompt
-    assert "fuzzy" in user_prompt
-    assert "note" in user_prompt
+    assert "translate-batch" in USER_PROMPT
+    assert "fuzzy" in USER_PROMPT
+    assert "note" in USER_PROMPT

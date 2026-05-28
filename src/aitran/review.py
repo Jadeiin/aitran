@@ -1,0 +1,361 @@
+"""Review pipeline: QA checks + LLM verdict on translated units."""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from contextlib import nullcontext
+from typing import TYPE_CHECKING
+
+from aitran.agents import (
+    ReviewDeps,
+    ReviewedUnit,
+    build_model,
+    build_review_input_xml,
+    build_reviewer_agent,
+)
+from aitran.agents._base import fmt_base_url
+from aitran.qa import QARunner, UnitQAReport
+from aitran.translate import _build_progress
+
+if TYPE_CHECKING:
+    from pydantic_ai import Agent
+    from rich.progress import Progress
+
+    from aitran.agents import ReviewBatch
+
+
+def _filter_review_units(
+    units: list,
+    qa_reports: list[UnitQAReport],
+    *,
+    start_index: int,
+    strict: bool,
+) -> tuple[list[UnitQAReport], list]:
+    """Filter units for review.
+
+    Returns:
+        Tuple of (qa_reports_to_review, units_to_review) — only units
+        that need LLM review are included.
+    """
+    qa_by_index = {r.index: r for r in qa_reports}
+    filtered_reports: list[UnitQAReport] = []
+    filtered_units: list = []
+    for i, u in enumerate(units):
+        idx = start_index + i
+        report = qa_by_index.get(idx)
+        has_qa_errors = report is not None and report.has_errors
+
+        if strict:
+            filtered_reports.append(report or UnitQAReport(index=idx))
+            filtered_units.append(u)
+        else:
+            is_fuzzy = getattr(u, "isfuzzy", lambda: False)()
+            has_notes = bool(getattr(u, "getnotes", lambda: "")().strip())
+            if has_qa_errors or is_fuzzy or has_notes:
+                filtered_reports.append(report or UnitQAReport(index=idx))
+                filtered_units.append(u)
+
+    return filtered_reports, filtered_units
+
+
+async def _review_chunk(
+    agent,
+    units: list,
+    qa_reports: list[UnitQAReport],
+    deps: ReviewDeps,
+    history: list,
+    on_progress=None,
+) -> list[ReviewedUnit]:
+    """Stream one review chunk through the agent.
+
+    Returns:
+        List of ReviewedUnit for units that need revise or reject handling.
+    """
+    user_msg = build_review_input_xml(units, qa_reports)
+    valid_indices = set(deps.expected_indices)
+    seen: set[int] = set()
+
+    async with agent.run_stream(
+        user_msg,
+        deps=deps,
+        message_history=history,
+    ) as run:
+        async for partial in run.stream_output(debounce_by=0.1):
+            for result in partial.units:
+                if result.index in seen or result.index not in valid_indices:
+                    continue
+                seen.add(result.index)
+                if on_progress:
+                    on_progress(result)
+        final = await run.get_output()
+        history.extend(run.new_messages())
+
+    return final.units
+
+
+async def _run_review_async(
+    store,
+    units: list,
+    source_lang: str,
+    target_lang: str,
+    model_spec: str,
+    translator,
+    output_path: str,
+    batch_size: int,
+    *,
+    auto_fix: bool = False,
+    strict: bool = False,
+    api_key: str | None = None,
+    api_host: str | None = None,
+    temperature: float = 0.1,
+    progress: Progress | None = None,
+) -> dict[str, int]:
+    """Run QA + LLM review on translated units.
+
+    Runs QA globally, filters to review-worthy units, then sends them
+    to the agent in fixed-size batches within the same conversation.
+
+    Returns:
+        Summary counts: ``{"pass": N, "revise": N, "reject": N}``.
+    """
+    base_url = fmt_base_url(api_host)
+    agent = build_reviewer_agent(
+        build_model(
+            model_spec, api_key=api_key, base_url=base_url, temperature=temperature
+        )
+    )
+
+    owns_progress = progress is None
+    progress = progress or _build_progress()
+
+    # Global QA + filtering: only review-worthy units go to the agent
+    qa_runner = QARunner(target_lang=target_lang)
+    qa_reports = qa_runner.check_units(units, start_index=1)
+    review_reports, review_units = _filter_review_units(
+        units, qa_reports, start_index=1, strict=strict
+    )
+    review_count = len(review_units)
+    total_count = len(units)
+
+    summary: dict[str, int] = {
+        "pass": total_count - review_count,
+        "revise": 0,
+        "reject": 0,
+    }
+    if not review_units:
+        print(f"Reviewed {total_count} units, all clean.")
+        translator.save(store, output_path)
+        return summary
+
+    task_id = progress.add_task("Reviewing", total=review_count)
+    history: list = []
+    unit_by_index = dict(enumerate(units, start=1))
+    global_done = 0
+    chunk_streamed: set[int] = set()
+    saved_indices: set[int] = set()
+
+    def on_review_done(result: ReviewedUnit) -> None:
+        nonlocal global_done
+        idx = result.index
+        if idx in saved_indices or idx in chunk_streamed:
+            return
+        chunk_streamed.add(idx)
+        global_done += 1
+        progress.update(task_id, completed=global_done)
+
+    def _commit_chunk(chunk_reports: list[UnitQAReport], reviewed: list[ReviewedUnit]):
+        nonlocal global_done
+        reviewed_indices = {r.index for r in reviewed}
+        for result in reviewed:
+            on_review_done(result)
+        pass_count = len(chunk_reports) - len(reviewed_indices)
+        global_done += pass_count
+        saved_indices.update(r.index for r in chunk_reports)
+        chunk_streamed.clear()
+        if pass_count:
+            progress.update(task_id, completed=global_done)
+
+    def _rollback_chunk() -> None:
+        nonlocal global_done
+        global_done -= len(chunk_streamed)
+        chunk_streamed.clear()
+        progress.update(task_id, completed=global_done)
+
+    with progress if owns_progress else nullcontext():
+        for start in range(0, review_count, batch_size):
+            chunk_units = review_units[start : start + batch_size]
+            chunk_reports = review_reports[start : start + batch_size]
+            deps = ReviewDeps(
+                source_lang=source_lang,
+                target_lang=target_lang,
+                context="",
+                expected_indices=tuple(r.index for r in chunk_reports),
+            )
+            try:
+                reviewed = await _review_chunk(
+                    agent,
+                    chunk_units,
+                    chunk_reports,
+                    deps,
+                    history,
+                    on_review_done,
+                )
+            except Exception:
+                _rollback_chunk()
+                raise
+            for r in reviewed:
+                summary[r.verdict] = summary.get(r.verdict, 0) + 1
+            summary["pass"] += len(chunk_units) - len(reviewed)
+            translator.apply_review_batch(
+                store,
+                unit_by_index,
+                reviewed,
+                auto_fix=auto_fix,
+            )
+            translator.save(store, output_path)
+            _commit_chunk(chunk_reports, reviewed)
+
+    if owns_progress:
+        progress.stop()
+
+    return summary
+
+
+def build_default_reviewer(
+    model_spec: str,
+    *,
+    api_key: str | None = None,
+    api_host: str | None = None,
+    temperature: float = 0.1,
+) -> Agent[ReviewDeps, ReviewBatch]:
+    """Build a reviewer agent from model spec strings.
+
+    Returns:
+        Configured reviewer agent.
+    """
+    base_url = fmt_base_url(api_host)
+    model = build_model(
+        model_spec, api_key=api_key, base_url=base_url, temperature=temperature
+    )
+    return build_reviewer_agent(model)
+
+
+def review_po(
+    model: str,
+    po_path: str,
+    source_lang: str,
+    target_lang: str,
+    output_path: str,
+    batch_size: int,
+    *,
+    strict: bool = False,
+    auto_fix: bool = False,
+    api_key: str | None = None,
+    api_host: str | None = None,
+    temperature: float = 0.1,
+) -> dict[str, int]:
+    """Review a single PO file.
+
+    Returns:
+        Summary counts: ``{"pass": N, "revise": N, "reject": N}``.
+    """
+    from aitran.translate import PoTranslator
+
+    translator = PoTranslator()
+    po_file = translator.parse(po_path)
+
+    if not target_lang:
+        inferred_lang = translator.get_target_language(po_file)
+        if inferred_lang:
+            target_lang = inferred_lang
+    if not target_lang:
+        print(
+            "No target language specified via --lang or PO header",
+            file=sys.stderr,
+        )
+        return {"pass": 0, "revise": 0, "reject": 0}
+
+    units = [u for u in po_file.units if u.source and not u.isheader() and u.target]
+    if not units:
+        print("No translated entries to review.")
+        return {"pass": 0, "revise": 0, "reject": 0}
+
+    return asyncio.run(
+        _run_review_async(
+            store=po_file,
+            units=units,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            model_spec=model,
+            translator=translator,
+            output_path=output_path,
+            batch_size=batch_size,
+            auto_fix=auto_fix,
+            strict=strict,
+            api_key=api_key,
+            api_host=api_host,
+            temperature=temperature,
+        )
+    )
+
+
+def review_xliff(
+    model: str,
+    xliff_path: str,
+    source_lang: str,
+    target_lang: str,
+    output_path: str,
+    batch_size: int,
+    *,
+    strict: bool = False,
+    auto_fix: bool = False,
+    api_key: str | None = None,
+    api_host: str | None = None,
+    temperature: float = 0.1,
+) -> dict[str, int]:
+    """Review a single XLIFF file.
+
+    Returns:
+        Summary counts: ``{"pass": N, "revise": N, "reject": N}``.
+    """
+    from aitran.translate import XliffTranslator
+
+    translator = XliffTranslator()
+    xlf = translator.parse(xliff_path)
+
+    if not target_lang:
+        target_lang = xlf.targetlanguage or ""
+    if not target_lang:
+        print(
+            "No target language specified via --lang or XLIFF header",
+            file=sys.stderr,
+        )
+        return {"pass": 0, "revise": 0, "reject": 0}
+
+    src = source_lang or xlf.sourcelanguage or "en"
+
+    units = [
+        u for u in xlf.units if (u.source or "").strip() and (u.target or "").strip()
+    ]
+    if not units:
+        print("No translated entries to review.")
+        return {"pass": 0, "revise": 0, "reject": 0}
+
+    return asyncio.run(
+        _run_review_async(
+            store=xlf,
+            units=units,
+            source_lang=src,
+            target_lang=target_lang,
+            model_spec=model,
+            translator=translator,
+            output_path=output_path,
+            batch_size=batch_size,
+            auto_fix=auto_fix,
+            strict=strict,
+            api_key=api_key,
+            api_host=api_host,
+            temperature=temperature,
+        )
+    )

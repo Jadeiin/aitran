@@ -32,9 +32,11 @@ format.
 Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (Click group).
 
 - `cli.py` — Click CLI with `translate` (default command), `sync`, `remove`, `userdict`, `crowdin`, `weblate` subcommands
-- `agent.py` — pydantic-ai agent definition, model routing (`build_model`), structured output types (`TranslatedUnit` / `TranslationBatch`), output validation
+- `agents/` — pydantic-ai agent definitions:
+  - `_base.py` — model routing (`build_model`), XML prompt builder (`build_input_xml`), shared helpers
+  - `translator.py` — translator agent (`build_translator_agent`), output types (`TranslatedUnit` / `TranslationBatch`), prompts
+  - `reviewer.py` — reviewer agent (`build_reviewer_agent`), output types (`ReviewedUnit` / `ReviewBatch`)
 - `translate.py` — batch translation loop with streaming via `rich` progress bars; `PoTranslator` and `XliffTranslator` adapter classes handle format-specific parse/filter/apply/save
-- `prompts/__init__.py` — inline system + user prompt strings (not external files)
 - `dicts.py` — glossary lookup with cascading config discovery (CWD → git root → XDG dir)
 - `manipulate.py` — PO entry removal by filter (fuzzy, obsolete, regex reference match)
 - `sync.py` — update PO from POT preserving existing translations
@@ -52,7 +54,7 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 
 ### Model routing
 
-`build_model()` in `agent.py` splits on `:` to get provider:model. Anthropic gets special `AnthropicModel` with prompt caching; all other providers route through `OpenAIChatModel` using pydantic-ai's `infer_provider_class()`. Unknown providers fall back to `OpenAIProvider` (OpenAI-compatible gateways).
+`build_model()` in `agents/_base.py` splits on `:` to get provider:model. Anthropic gets special `AnthropicModel` with prompt caching; all other providers route through `OpenAIChatModel` using pydantic-ai's `infer_provider_class()`. Unknown providers fall back to `OpenAIProvider` (OpenAI-compatible gateways).
 
 ## Conventions & Gotchas
 

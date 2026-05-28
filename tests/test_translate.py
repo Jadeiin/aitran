@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from importlib.metadata import version as package_version
 
+import httpx
 import pytest
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import FunctionModel
@@ -14,16 +15,19 @@ from translate.misc import xml_helpers
 from translate.misc.multistring import multistring
 from translate.storage import po
 
-from aitran.agent import (
+from aitran.agents import (
+    ReviewedUnit,
     TranslatedUnit,
     TranslationDeps,
-    build_input_xml,
     build_model,
+    build_retrying_http_client,
+    build_translation_input_xml,
     build_translator_agent,
 )
 from aitran.translate import (
     PoTranslator,
     XliffTranslator,
+    _run_translation_async,
     _translate_batch,
     translate_po,
     translate_po_dir,
@@ -59,43 +63,43 @@ def _make_deps(expected_indices=(1, 2), plural_tags=None):
     )
 
 
-# ── build_input_xml ──────────────────────────────────────────────
+# ── build_translation_input_xml ──────────────────────────────────────────────
 
 
-def test_build_input_xml_basic():
+def test_build_translation_input_xml_basic():
     units = [FakeUnit("Hello"), FakeUnit("World")]
-    xml = build_input_xml(units, start_index=1)
+    xml = build_translation_input_xml(units, start_index=1)
     assert "<translate-batch>" in xml
     assert "</translate-batch>" in xml
     assert "<index>1</index>" in xml and "<source>Hello</source>" in xml
     assert "<index>2</index>" in xml and "<source>World</source>" in xml
 
 
-def test_build_input_xml_with_context():
+def test_build_translation_input_xml_with_context():
     units = [FakeUnit("File", context="Menu", _note="top-level")]
-    xml = build_input_xml(units, start_index=5)
+    xml = build_translation_input_xml(units, start_index=5)
     assert "<index>5</index>" in xml
     assert "<context>Menu</context>" in xml
     assert "<note>top-level</note>" in xml
 
 
-def test_build_input_xml_omits_none_fields():
+def test_build_translation_input_xml_omits_none_fields():
     units = [FakeUnit("Plain")]
-    xml = build_input_xml(units, start_index=1)
+    xml = build_translation_input_xml(units, start_index=1)
     assert "context" not in xml
     assert "comment" not in xml
     assert "null" not in xml
 
 
-def test_build_input_xml_strips_invalid_xml_characters():
+def test_build_translation_input_xml_strips_invalid_xml_characters():
     units = [FakeUnit("Hello \x08 world")]
-    xml = build_input_xml(units, start_index=1)
+    xml = build_translation_input_xml(units, start_index=1)
     assert "\x08" not in xml
     assert "Hello  world" in xml
     xml_helpers.parse_xml(xml)
 
 
-def test_build_input_xml_preserves_escaped_markup_after_sanitizing():
+def test_build_translation_input_xml_preserves_escaped_markup_after_sanitizing():
     units = [
         FakeUnit(
             'Click <a href="/docs?a=1&b=2">docs</a><br/><code>x & y</code>\x08',
@@ -103,7 +107,7 @@ def test_build_input_xml_preserves_escaped_markup_after_sanitizing():
             _note="Keep <code>, <a>, and <br/> tags.",
         )
     ]
-    xml = build_input_xml(units, start_index=1)
+    xml = build_translation_input_xml(units, start_index=1)
 
     assert "\x08" not in xml
     assert '&lt;a href="/docs?a=1&amp;b=2"&gt;docs&lt;/a&gt;' in xml
@@ -365,7 +369,7 @@ def test_translate_po_infers_target_language_from_header(monkeypatch, tmp_path):
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     assert captured["target_lang"] == "zh_CN"
@@ -402,7 +406,7 @@ def test_translate_po_infers_legacy_target_language_from_script_header(
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     assert captured["target_lang"] == "zh_CN"
@@ -438,7 +442,7 @@ def test_translate_po_infers_target_language_from_language_team(monkeypatch, tmp
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     out = source.read_text(encoding="utf-8")
@@ -477,7 +481,7 @@ def test_translate_po_infers_target_language_from_poedit_headers(monkeypatch, tm
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     out = source.read_text(encoding="utf-8")
@@ -516,7 +520,7 @@ def test_translate_po_without_lang_or_header_reports_error(
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     captured = capsys.readouterr()
@@ -554,13 +558,71 @@ def test_translate_po_updates_last_translator_with_package_version(
         verbose=False,
         output_path=str(source),
         context_file=None,
-        context_length=4096,
+        batch_size=100,
     )
 
     out = source.read_text(encoding="utf-8")
     assert f"Last-Translator: aitran v{package_version('aitran')}" in out
     assert "Jane Doe <jane@example.com>" not in out
     assert "aitran v0.1.0" not in out
+
+
+async def test_translation_preserves_completed_batches_after_later_failure(
+    monkeypatch, tmp_path
+):
+    source = tmp_path / "messages.po"
+    source.write_text(
+        (
+            'msgid ""\n'
+            'msgstr ""\n'
+            '"Language: zh_CN\\n"\n'
+            '"Content-Type: text/plain; charset=UTF-8\\n"\n'
+            "\n"
+            'msgid "Hello"\n'
+            'msgstr ""\n'
+            "\n"
+            'msgid "World"\n'
+            'msgstr ""\n'
+        ),
+        encoding="utf-8",
+    )
+    po_file = PoTranslator.parse(str(source))
+    units = PoTranslator.get_untranslated(po_file)
+    output_path = tmp_path / "out.po"
+    calls = 0
+
+    async def fake_translate_batch(*_args, **_kwargs):  # noqa: RUF029
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [TranslatedUnit(index=1, targets=["你好"], fuzzy=False)]
+        raise RuntimeError("later batch failed")
+
+    monkeypatch.setattr(
+        "aitran.translate.build_model", lambda *_args, **_kwargs: TestModel()
+    )
+    monkeypatch.setattr("aitran.translate._translate_batch", fake_translate_batch)
+
+    with pytest.raises(RuntimeError, match="later batch failed"):
+        await _run_translation_async(
+            store=po_file,
+            units=units,
+            source_lang="en",
+            target_lang="zh_CN",
+            model_spec=DEFAULT_TEST_MODEL,
+            translator=PoTranslator(),
+            output_path=str(output_path),
+            context_file=None,
+            batch_size=1,
+            verbose=False,
+            progress_label="messages.po",
+        )
+
+    out = output_path.read_text(encoding="utf-8")
+    assert 'msgid "Hello"' in out
+    assert 'msgstr "你好"' in out
+    assert 'msgid "World"' in out
+    assert 'msgstr ""' in out
 
 
 # ── XliffTranslator apply_batch ───────────────────────────────────
@@ -640,6 +702,171 @@ def test_xliff_apply_batch_clean_state():
     assert 'state="translated"' in out
 
 
+# ── PoXliff plural support ──────────────────────────────────────────
+
+
+_POXLIFF_PLURAL_XML = b"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.1" xmlns="urn:oasis:names:tc:xliff:document:1.1"
+       datatype="po" source-language="en" target-language="ar">
+  <file original="test.po" datatype="po">
+    <body>
+      <trans-unit id="singular" xml:space="preserve">
+        <source>Check the console for a link.</source>
+        <target/>
+      </trans-unit>
+      <group restype="x-gettext-plurals" id="aaa" xml:space="preserve">
+        <trans-unit xml:space="preserve" id="aaa[0]">
+          <source>%d file</source>
+          <target/>
+        </trans-unit>
+        <trans-unit xml:space="preserve" id="aaa[1]">
+          <source>%d files</source>
+          <target/>
+        </trans-unit>
+      </group>
+      <group restype="x-gettext-plurals" id="bbb" xml:space="preserve">
+        <trans-unit xml:space="preserve" id="bbb[0]">
+          <source>%d item</source>
+          <target state="translated">item translated</target>
+        </trans-unit>
+        <trans-unit xml:space="preserve" id="bbb[1]">
+          <source>%d items</source>
+          <target/>
+        </trans-unit>
+      </group>
+      <group restype="x-gettext-plurals" id="ccc" xml:space="preserve">
+        <trans-unit xml:space="preserve" id="ccc[0]">
+          <source>%d message</source>
+          <target state="translated">message translated</target>
+        </trans-unit>
+        <trans-unit xml:space="preserve" id="ccc[1]">
+          <source>%d messages</source>
+          <target state="translated">messages translated</target>
+        </trans-unit>
+      </group>
+    </body>
+  </file>
+</xliff>
+"""
+
+
+def test_poxliff_get_untranslated_plural():
+    from translate.storage import poxliff
+
+    xlf = poxliff.PoXliffFile.parsestring(_POXLIFF_PLURAL_XML)
+    untranslated = XliffTranslator.get_untranslated(xlf)
+    ids = [u.xmlelement.get("id") for u in untranslated]
+    # aaa: all forms empty → untranslated
+    # bbb: second form empty → untranslated
+    # ccc: both forms filled → translated
+    assert "aaa" in ids
+    assert "bbb" in ids
+    assert "ccc" not in ids
+
+
+def test_poxliff_apply_batch_plural():
+    from translate.storage import poxliff
+
+    xlf = poxliff.PoXliffFile.parsestring(_POXLIFF_PLURAL_XML)
+    unit = xlf.units[1]  # group 1 (plural)
+    assert unit.hasplural()
+
+    XliffTranslator.apply_batch(
+        xlf,
+        [unit],
+        [
+            TranslatedUnit(
+                index=0, targets=["one file translated", "many files translated"],
+                fuzzy=False,
+            ),
+        ],
+    )
+    targets = unit.target.strings
+    assert targets[0] == "one file translated"
+    assert targets[1] == "many files translated"
+
+
+def test_poxliff_apply_batch_plural_fuzzy_on_count_mismatch():
+    from translate.storage import poxliff
+
+    xlf = poxliff.PoXliffFile.parsestring(_POXLIFF_PLURAL_XML)
+    unit = xlf.units[1]  # group 1 (plural)
+
+    XliffTranslator.apply_batch(
+        xlf,
+        [unit],
+        [
+            TranslatedUnit(index=0, targets=["only one form"], fuzzy=False),
+        ],
+    )
+    out = bytes(xlf).decode()
+    assert "needs-review" in out
+
+
+def test_poxliff_apply_review_batch_plural_auto_fix():
+    from translate.storage import poxliff
+
+    xlf = poxliff.PoXliffFile.parsestring(_POXLIFF_PLURAL_XML)
+    unit = xlf.units[2]  # group 2: form 0 translated, form 1 empty
+    assert unit.hasplural()
+
+    units_by_index = {0: unit}
+    XliffTranslator.apply_review_batch(
+        xlf,
+        units_by_index,
+        [
+            ReviewedUnit(index=0, verdict="revise", corrected="corrected item"),
+        ],
+        auto_fix=True,
+    )
+    targets = unit.target.strings
+    # form 0 gets the correction; form 1 is preserved (empty)
+    assert targets[0] == "corrected item"
+    assert targets[1] == ""
+
+
+_PLAINTEXT_POXLIFF_XML = b"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.1" xmlns="urn:oasis:names:tc:xliff:document:1.1">
+  <file original="NoName" source-language="en"
+        datatype="plaintext" target-language="de">
+    <body>
+      <trans-unit xml:space="preserve" id="aaa">
+        <source>Hello</source>
+        <target state="translated">Hallo</target>
+      </trans-unit>
+      <group restype="x-gettext-plurals" xml:space="preserve" id="bbb">
+        <trans-unit xml:space="preserve" id="bbb[0]">
+          <source>%d item</source>
+          <target state="translated">Eintrag</target>
+        </trans-unit>
+        <trans-unit xml:space="preserve" id="bbb[1]">
+          <source>%d items</source>
+          <target state="translated">Eintraege</target>
+        </trans-unit>
+      </group>
+    </body>
+  </file>
+</xliff>
+"""
+
+
+def test_xliff_parse_auto_detects_poxliff_from_plaintext_datatype(tmp_path):
+    from translate.storage import poxliff
+
+    xlf_path = tmp_path / "test.xlf"
+    xlf_path.write_bytes(_PLAINTEXT_POXLIFF_XML)
+    xlf = XliffTranslator.parse(str(xlf_path))
+    assert isinstance(xlf, poxliff.PoXliffFile)
+    # The plural group should be a single PoXliffUnit with hasplural()=True
+    plural_units = [u for u in xlf.units if u.hasplural()]
+    assert len(plural_units) == 1
+    assert plural_units[0].xmlelement.get("id") == "bbb"
+    sources = plural_units[0].source.strings
+    assert sources == ["%d item", "%d items"]
+
+
 # ── build_model ────────────────────────────────────────────────────
 
 
@@ -661,6 +888,43 @@ def test_build_model_openai_provider():
     assert isinstance(m, OpenAIChatModel)
 
 
+async def test_retrying_http_client_retries_rate_limits():
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(
+                429,
+                headers={"retry-after": "0"},
+                request=request,
+            )
+        return httpx.Response(200, text="ok", request=request)
+
+    client = build_retrying_http_client(httpx.MockTransport(handler))
+    try:
+        response = await client.get("https://example.test/")
+    finally:
+        await client.aclose()
+
+    assert response.status_code == 200
+    assert attempts == 2
+
+
+async def test_retrying_http_client_preserves_model_timeout():
+    client = build_retrying_http_client(
+        httpx.MockTransport(lambda _: httpx.Response(200))
+    )
+    try:
+        assert client.timeout.connect == pytest.approx(5.0)
+        assert client.timeout.read == pytest.approx(600.0)
+        assert client.timeout.write == pytest.approx(600.0)
+        assert client.timeout.pool == pytest.approx(600.0)
+    finally:
+        await client.aclose()
+
+
 # ── Agent instructions injection ────────────────────────────────────
 
 
@@ -680,7 +944,7 @@ def test_agent_instructions_inject_glossary():
     agent = build_translator_agent(model)
     with agent.override(model=model):
         agent.run_sync(
-            build_input_xml([FakeUnit("login")], start_index=1),
+            build_translation_input_xml([FakeUnit("login")], start_index=1),
             deps=deps,
         )
 
@@ -716,7 +980,7 @@ def test_agent_instructions_reject_ambiguous_language_code():
         pytest.raises(ValueError, match="Unknown or ambiguous language code"),
     ):
         agent.run_sync(
-            build_input_xml([FakeUnit("login")], start_index=1),
+            build_translation_input_xml([FakeUnit("login")], start_index=1),
             deps=deps,
         )
 
@@ -1068,7 +1332,7 @@ class FakePluralUnit:
         return self._note or ""
 
 
-def test_build_input_xml_plural_units():
+def test_build_translation_input_xml_plural_units():
     """Plural units should include sources and plural_tags."""
     units = [
         FakePluralUnit(
@@ -1078,17 +1342,21 @@ def test_build_input_xml_plural_units():
             ])
         ),
     ]
-    xml = build_input_xml(units, start_index=1, plural_tags=["one", "other"])
+    xml = build_translation_input_xml(
+        units, start_index=1, plural_tags=["one", "other"]
+    )
     assert "{0} result" in xml
     assert "{0} results" in xml
     assert "<sources>" in xml
     assert "plural_tags" not in xml
 
 
-def test_build_input_xml_singular_no_plural_tags():
+def test_build_translation_input_xml_singular_no_plural_tags():
     """Singular units should not include plural_tags."""
     units = [FakeUnit("Hello")]
-    xml = build_input_xml(units, start_index=1, plural_tags=["one", "other"])
+    xml = build_translation_input_xml(
+        units, start_index=1, plural_tags=["one", "other"]
+    )
     assert "<source>Hello</source>" in xml
     assert "plural_tags" not in xml
     assert "sources" not in xml
@@ -1109,9 +1377,7 @@ async def test_translate_batch_handles_plural_targets():
     )
     agent = build_translator_agent(model)
     units = [
-        FakePluralUnit(
-            source=multistring(["{0} result", "{0} results"])
-        ),
+        FakePluralUnit(source=multistring(["{0} result", "{0} results"])),
     ]
     with agent.override(model=model):
         results = await _translate_batch(

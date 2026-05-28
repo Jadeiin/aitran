@@ -16,6 +16,7 @@ from aitran.crowdin import list_projects as crowdin_list_projects
 from aitran.crowdin import upload_translation as crowdin_upload_translation
 from aitran.manipulate import remove_by_options
 from aitran.observability import ObservabilityError, flush_logfire, setup_logfire
+from aitran.review import review_po, review_xliff
 from aitran.sync import sync
 from aitran.translate import (
     translate_po,
@@ -196,10 +197,10 @@ def app() -> None:
     help="Text file with additional translation context",
 )
 @click.option(
-    "--context-length",
+    "--batch-size",
     type=int,
-    default=4096,
-    help="Max accumulated source length per API batch",
+    default=100,
+    help="Max units per API batch",
 )
 @click.option(
     "--jobs",
@@ -268,7 +269,7 @@ def translate(
     lang: str | None,
     verbose: bool,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     jobs: int,
     order: str,
     profile: str,
@@ -310,7 +311,7 @@ def translate(
         "target_lang": lang or "",
         "verbose": verbose,
         "context_file": context_file,
-        "context_length": context_length,
+        "batch_size": batch_size,
         "api_key": key,
         "api_host": host,
         "temperature": temperature,
@@ -354,6 +355,163 @@ def translate(
             sys.exit(1)
     finally:
         flush_logfire(enabled=logfire_enabled)
+
+
+@app.command(
+    "review",
+    context_settings=CONTEXT_SETTINGS,
+    help="Review translated PO/XLIFF files using QA + LLM.",
+)
+@click.option(
+    "-m",
+    "--model",
+    envvar="AITRAN_MODEL",
+    default="deepseek:deepseek-v4-flash",
+    help=(
+        "Model in <provider>:<model> format "
+        "(e.g. openai:gpt-5.4-mini, anthropic:claude-haiku-4-5)"
+    ),
+)
+@click.option(
+    "-k", "--key", envvar="AITRAN_API_KEY", help="API key for the LLM provider"
+)
+@click.option("--host", envvar="AITRAN_API_HOST", help="Custom API base URL")
+@click.option(
+    "-t",
+    "--temperature",
+    envvar="AITRAN_MODEL_TMP",
+    type=float,
+    default=0.1,
+    help="LLM temperature (0.0-2.0)",
+)
+@click.option("--po", "po_file", type=click.Path(exists=True), help="PO file path")
+@click.option(
+    "--xliff",
+    "xliff_file",
+    type=click.Path(exists=True),
+    help="XLIFF/XLF file path",
+)
+@click.option("-src", "--source", default="en", help="Source language (ISO 639-1)")
+@click.option("-l", "--lang", help="Target language (ISO 639-1)")
+@click.option(
+    "--batch-size",
+    type=int,
+    default=100,
+    help="Max units per review batch",
+)
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Review all units (default: only units with QA errors or markers)",
+)
+@click.option(
+    "--auto-fix",
+    is_flag=True,
+    help="Write corrected targets back to the file",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(),
+    help="Output file path (default: overwrite input)",
+)
+@click.option(
+    "--logfire",
+    is_flag=True,
+    envvar="AITRAN_LOGFIRE",
+    help=(
+        "Enable Pydantic Logfire tracing for agent/model runs. "
+        "Prompts and completions may be sent to Logfire."
+    ),
+)
+@click.option(
+    "--logfire-capture-http",
+    is_flag=True,
+    envvar="AITRAN_LOGFIRE_CAPTURE_HTTP",
+    help=(
+        "Also capture provider HTTP headers and bodies in Logfire. "
+        "This may include prompts, completions, and credentials."
+    ),
+)
+def review(
+    model: str,
+    key: str | None,
+    host: str | None,
+    temperature: float,
+    po_file: str | None,
+    xliff_file: str | None,
+    source: str,
+    lang: str | None,
+    batch_size: int,
+    strict: bool,
+    auto_fix: bool,
+    output: str | None,
+    logfire: bool,
+    logfire_capture_http: bool,
+) -> None:
+    """Review translated PO/XLIFF files using QA + LLM.
+
+    Runs rule-based QA checks, then sends problematic units to an LLM
+    reviewer for final verdict (pass/revise/reject).
+
+    Raises:
+        click.ClickException: If optional observability setup fails.
+    """
+    if not po_file and not xliff_file:
+        click.echo("Error: --po or --xliff is required", err=True)
+        sys.exit(1)
+    if po_file and xliff_file:
+        click.echo("Error: --po and --xliff are mutually exclusive", err=True)
+        sys.exit(1)
+
+    logfire_enabled = False
+    try:
+        logfire_enabled = setup_logfire(
+            enabled=logfire,
+            capture_http=logfire_capture_http,
+        )
+    except ObservabilityError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        if po_file:
+            summary = review_po(
+                model=model,
+                po_path=po_file,
+                source_lang=source,
+                target_lang=lang or "",
+                output_path=output or po_file,
+                batch_size=batch_size,
+                strict=strict,
+                auto_fix=auto_fix,
+                api_key=key,
+                api_host=host,
+                temperature=temperature,
+            )
+        else:
+            summary = review_xliff(
+                model=model,
+                xliff_path=xliff_file,
+                source_lang=source,
+                target_lang=lang or "",
+                output_path=output or xliff_file,
+                batch_size=batch_size,
+                strict=strict,
+                auto_fix=auto_fix,
+                api_key=key,
+                api_host=host,
+                temperature=temperature,
+            )
+    finally:
+        flush_logfire(enabled=logfire_enabled)
+
+    total = sum(summary.values())
+    click.echo(
+        f"\nReviewed: {total} units\n"
+        f"  pass:   {summary.get('pass', 0)}\n"
+        f"  revise: {summary.get('revise', 0)}\n"
+        f"  reject: {summary.get('reject', 0)}"
+    )
 
 
 @app.command("sync", context_settings=CONTEXT_SETTINGS)

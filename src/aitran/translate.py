@@ -4,30 +4,33 @@ from __future__ import annotations
 
 import asyncio
 import os
-import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, ClassVar
 
-from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
-from translate.misc import quote, xml_helpers
+from translate.misc import quote
 from translate.misc.multistring import multistring
 from translate.storage import po, xliff
 
-from aitran.agent import (
+from aitran.agents import (
+    ReviewedUnit,
     TranslationDeps,
-    build_input_xml,
     build_model,
+    build_translation_input_xml,
     build_translator_agent,
 )
+from aitran.agents._base import fmt_base_url, safe_prompt_text
 from aitran.dicts import find_matching_entries
 
 if TYPE_CHECKING:
-    from aitran.agent import TranslatedUnit
+    from collections.abc import Mapping
+
+    from aitran.agents import TranslatedUnit
 
 _LEGACY_LANGUAGE_CODES = {
     "zh_Hans": "zh_CN",
@@ -65,14 +68,6 @@ def _read_context(context_file: str | None) -> str:
         return ""
     with open(context_file, encoding="utf-8") as f:
         return f.read().strip()
-
-
-def _is_rate_limit(exc: ModelHTTPError) -> bool:
-    return exc.status_code == 429
-
-
-def _is_timeout(exc: ModelHTTPError) -> bool:
-    return exc.status_code in (408, 504)
 
 
 def _last_translator() -> str:
@@ -147,9 +142,8 @@ class PoTranslator:
                         if hasattr(unit.target, "strings")
                         else [unit.target]
                     )
-                    if (
-                        len(targets) < len(plural_tags)
-                        or any(not t.strip() for t in targets)
+                    if len(targets) < len(plural_tags) or any(
+                        not t.strip() for t in targets
                     ):
                         result.append(unit)
                         continue
@@ -166,9 +160,7 @@ class PoTranslator:
         """Apply a batch of agent results."""
         plural_tags = po_file.get_plural_tags()
         for unit, result in zip(units, results, strict=True):
-            cleaned = [
-                xml_helpers.valid_chars_only(t) for t in result.targets
-            ]
+            cleaned = [safe_prompt_text(t) for t in result.targets]
             if unit.hasplural():
                 if len(cleaned) != len(plural_tags):
                     result.fuzzy = True
@@ -182,6 +174,49 @@ class PoTranslator:
             unit.markfuzzy(result.fuzzy)
             if result.note:
                 unit.addnote(result.note, origin="translator")
+
+    @staticmethod
+    def apply_review_batch(
+        po_file: po.pofile,
+        units_by_index: Mapping[int, po.pounit],
+        results: list[ReviewedUnit],
+        *,
+        auto_fix: bool = False,
+    ) -> None:
+        """Apply review results to PO units.
+
+        Without *auto_fix*, only marks ``revise``/``reject`` entries as fuzzy
+        with a review note.  With *auto_fix*, also writes the corrected target
+        and clears the fuzzy marker.
+        """
+        for result in results:
+            unit = units_by_index[result.index]
+            if auto_fix and result.corrected is not None:
+                corrected = _decode_serialized_markup(
+                    str(unit.source),
+                    safe_prompt_text(result.corrected),
+                )
+                if unit.hasplural():
+                    existing = (
+                        unit.target.strings
+                        if hasattr(unit.target, "strings")
+                        else [str(unit.target)]
+                    )
+                    forms = [corrected, *existing[1:]]
+                    unit.target = po.pounit.sync_plural_count(
+                        multistring(forms),
+                        po_file.get_plural_tags(),
+                    )
+                else:
+                    unit.target = corrected
+                unit.markfuzzy(unit.hasplural())
+            else:
+                unit.markfuzzy(True)
+            if result.note:
+                unit.addnote(
+                    f"(review) {result.verdict}: {result.note}",
+                    origin="translator",
+                )
 
     @staticmethod
     def save(po_file: po.pofile, path: str) -> None:
@@ -198,7 +233,6 @@ class PoTranslator:
 class XliffTranslator:
     """Handles XLIFF file parsing, filtering, and output."""
 
-    _XLIFF_NS = "{urn:oasis:names:tc:xliff:document:1.2}"
     _DONE_STATES: ClassVar[set[str]] = {"final", "signed-off", "translated"}
 
     @staticmethod
@@ -206,13 +240,29 @@ class XliffTranslator:
         """Parse an XLIFF file from disk.
 
         Returns:
-            Parsed XLIFF file object.
+            Parsed XLIFF file object.  Files containing gettext plural
+            groups (``restype="x-gettext-plurals"``) are automatically
+            re-parsed as ``PoXliffFile`` so plural units are exposed
+            correctly, even when the ``datatype`` is not ``"po"``.
         """
-        return xliff.xlifffile.parsefile(path)
+        from translate.storage import poxliff
+
+        xlf = xliff.xlifffile.parsefile(path)
+        if isinstance(xlf, poxliff.PoXliffFile):
+            return xlf
+        # Detect gettext plural groups that the default parser missed.
+        ns = xlf.namespace
+        groups = xlf.document.getroot().iterdescendants(
+            f"{{{ns}}}group" if ns else "group"
+        )
+        if any(g.get("restype") == "x-gettext-plurals" for g in groups):
+            return poxliff.PoXliffFile.parsestring(bytes(xlf))
+        return xlf
 
     @staticmethod
     def _get_state(unit: xliff.xliffunit) -> str:
-        target_elem = unit.xmlelement.find(f"{XliffTranslator._XLIFF_NS}target")
+        tag = unit.namespaced("target")
+        target_elem = unit.xmlelement.find(tag)
         if target_elem is not None:
             return target_elem.get("state", "")
         return ""
@@ -225,16 +275,31 @@ class XliffTranslator:
     def get_untranslated(cls, xlf: xliff.xlifffile) -> list[xliff.xliffunit]:
         """Return units that need translation."""
         result: list[xliff.xliffunit] = []
+        plural_tags = xlf.get_plural_tags()
         for unit in xlf.units:
             if not cls._get_translate_flag(unit):
                 continue
             state = cls._get_state(unit).lower()
-            target = (unit.target or "").strip()
-            source = (unit.source or "").strip()
 
             if state.startswith("needs-") or state == "new":
                 result.append(unit)
                 continue
+
+            # Plural units: check all forms individually.
+            if unit.hasplural() and len(plural_tags) > 1:
+                targets = (
+                    unit.target.strings
+                    if hasattr(unit.target, "strings")
+                    else [str(unit.target or "")]
+                )
+                if len(targets) < len(plural_tags) or any(
+                    not t.strip() for t in targets
+                ):
+                    result.append(unit)
+                continue
+
+            target = (unit.target or "").strip()
+            source = (unit.source or "").strip()
             if not target:
                 result.append(unit)
                 continue
@@ -246,19 +311,74 @@ class XliffTranslator:
 
     @staticmethod
     def apply_batch(
-        _xlf: xliff.xlifffile,
+        xlf: xliff.xlifffile,
         units: list[xliff.xliffunit],
         results: list[TranslatedUnit],
     ) -> None:
         """Apply translation results to XLIFF units."""
+        plural_tags = xlf.get_plural_tags()
         for unit, result in zip(units, results, strict=True):
-            unit.settarget(xml_helpers.valid_chars_only(result.targets[0]))
+            cleaned = [safe_prompt_text(t) for t in result.targets]
+            if unit.hasplural():
+                if len(cleaned) != len(plural_tags):
+                    result.fuzzy = True
+                unit.settarget(multistring(cleaned))
+            else:
+                unit.settarget(cleaned[0])
             if result.fuzzy:
                 unit.markreviewneeded()
+                # PoXliffUnit.markreviewneeded() does not propagate to
+                # child trans-units unlike marktranslated/markfuzzy.
+                if unit.hasplural():
+                    for child in unit.units:
+                        child.markreviewneeded()
             else:
                 unit.marktranslated()
             if result.note:
                 unit.addnote(result.note, origin="translator")
+
+    @staticmethod
+    def apply_review_batch(
+        _store,
+        units_by_index: Mapping[int, xliff.xliffunit],
+        results: list[ReviewedUnit],
+        *,
+        auto_fix: bool = False,
+    ) -> None:
+        """Apply review results to XLIFF units.
+
+        Without *auto_fix*, only marks ``revise``/``reject`` entries as
+        needs-review with a note.  With *auto_fix*, also writes the corrected
+        target and marks translated.
+        """
+        for result in results:
+            unit = units_by_index[result.index]
+            if auto_fix and result.corrected is not None:
+                corrected = _decode_serialized_markup(
+                    str(unit.source),
+                    safe_prompt_text(result.corrected),
+                )
+                if unit.hasplural():
+                    existing = (
+                        unit.target.strings
+                        if hasattr(unit.target, "strings")
+                        else [str(unit.target)]
+                    )
+                    unit.settarget(multistring([corrected, *existing[1:]]))
+                    unit.markfuzzy(True)
+                else:
+                    unit.settarget(corrected)
+                    unit.marktranslated()
+            else:
+                unit.markreviewneeded()
+                if unit.hasplural():
+                    for child in unit.units:
+                        child.markreviewneeded()
+            if result.note:
+                unit.addnote(
+                    f"(review) {result.verdict}: {result.note}",
+                    origin="translator",
+                )
 
     @staticmethod
     def save(xlf: xliff.xlifffile, path: str) -> None:
@@ -287,7 +407,7 @@ async def _translate_batch(
     Returns:
         List of TranslatedUnit aligned with the input units list.
     """
-    user_msg = build_input_xml(
+    user_msg = build_translation_input_xml(
         units,
         start_index,
         profile=profile,
@@ -322,9 +442,7 @@ async def _translate_batch(
         # Reverse XML escaping applied by format_as_xml only when the source
         # had raw markup. Already-escaped source strings must remain escaped.
         raw = units[i].source
-        source_strings = (
-            raw.strings if hasattr(raw, "strings") else [str(raw)]
-        )
+        source_strings = raw.strings if hasattr(raw, "strings") else [str(raw)]
         if (
             len(tu.targets) == 1
             and len(source_strings) > 1
@@ -333,9 +451,7 @@ async def _translate_batch(
         ):
             # One-form plural (e.g. Chinese): decode against all source forms.
             combined = " ".join(str(s) for s in source_strings)
-            tu.targets = [
-                _decode_serialized_markup(combined, tu.targets[0])
-            ]
+            tu.targets = [_decode_serialized_markup(combined, tu.targets[0])]
         else:
             tu.targets = [
                 _decode_serialized_markup(
@@ -357,7 +473,7 @@ async def _run_translation_async(
     translator,  # PoTranslator | XliffTranslator
     output_path: str,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     verbose: bool,
     progress_label: str,
     *,
@@ -368,17 +484,12 @@ async def _run_translation_async(
     profile: str = "full",
     plural_tags: list[str] | None = None,
 ) -> None:
-    """Shared batch loop driving the translator agent.
-
-    Raises:
-        ModelHTTPError: On fatal HTTP errors (401, 403, 400) or when
-            retry limits for rate-limit / server errors are exhausted.
-    """
+    """Shared batch loop driving the translator agent."""
     context = _read_context(context_file)
     sources = [u.source for u in units]
     dict_entries = find_matching_entries(sources, target_lang)
 
-    base_url = (api_host.rstrip("/") + "/v1") if api_host else None
+    base_url = fmt_base_url(api_host)
     agent = build_translator_agent(
         build_model(
             model_spec, api_key=api_key, base_url=base_url, temperature=temperature
@@ -425,130 +536,75 @@ async def _run_translation_async(
         progress.update(task_id, completed=global_done)
 
     batch: list = []
-    char_count = 0
-    i = 0
     next_start_index = 1
     batch_retries = 0
     BATCH_MAX_RETRIES = 3
-    rate_limit_retries = 0
-    MAX_RATE_LIMIT_RETRIES = 5
-    server_error_retries = 0
-    MAX_SERVER_ERROR_RETRIES = 3
+
+    async def _flush_batch() -> None:
+        """Flush current batch and apply translations."""
+        nonlocal batch_retries
+        nonlocal next_start_index, batch
+        while True:
+            deps = TranslationDeps(
+                source_lang=source_lang,
+                target_lang=target_lang,
+                context=context,
+                dict_entries=dict_entries,
+                expected_indices=tuple(
+                    range(next_start_index, next_start_index + len(batch))
+                ),
+                plural_tags=plural_tags,
+            )
+            try:
+                results = await _translate_batch(
+                    agent,
+                    batch,
+                    next_start_index,
+                    deps,
+                    history,
+                    on_unit_done,
+                    profile=profile,
+                )
+                translator.apply_batch(store, batch, results)
+                translator.save(store, output_path)
+                _commit_batch()
+                next_start_index += len(batch)
+                batch = []
+                batch_retries = 0
+                return
+            except UnexpectedModelBehavior as e:
+                batch_retries += 1
+                cause = e.__cause__
+                cause_msg = f": {cause}" if cause is not None else ""
+                if batch_retries < BATCH_MAX_RETRIES:
+                    _rollback_batch()
+                    console.print(
+                        f"\n[yellow]Output validation failed{cause_msg}. "
+                        f"Retrying batch "
+                        f"({batch_retries}/{BATCH_MAX_RETRIES})...[/]"
+                    )
+                    continue
+                console.print(
+                    f"\n[red]Output validation failed after "
+                    f"{BATCH_MAX_RETRIES} retries{cause_msg}. "
+                    f"Skipping {len(batch)} unit(s).[/]"
+                )
+                _commit_batch()
+                next_start_index += len(batch)
+                batch = []
+                batch_retries = 0
+                return
 
     with progress if owns_progress else nullcontext():
-        while i < len(units):
-            unit = units[i]
-            src_len = len(unit.source)
-            if char_count < context_length:
-                batch.append(unit)
-                char_count += src_len
-            if char_count >= context_length or i == len(units) - 1:
-                deps = TranslationDeps(
-                    source_lang=source_lang,
-                    target_lang=target_lang,
-                    context=context,
-                    dict_entries=dict_entries,
-                    expected_indices=tuple(
-                        range(next_start_index, next_start_index + len(batch))
-                    ),
-                    plural_tags=plural_tags,
-                )
-                try:
-                    results = await _translate_batch(
-                        agent,
-                        batch,
-                        next_start_index,
-                        deps,
-                        history,
-                        on_unit_done,
-                        profile=profile,
-                    )
-                    translator.apply_batch(store, batch, results)
-                    translator.save(store, output_path)
-                    _commit_batch()
-                    next_start_index += len(batch)
-                    batch = []
-                    char_count = 0
-                    batch_retries = 0
-                    rate_limit_retries = 0
-                    server_error_retries = 0
-                except ModelHTTPError as e:
-                    if e.status_code in (401, 403):
-                        console.print(
-                            f"\n[red]Authentication error {e.status_code}. "
-                            f"Check your API key.[/]"
-                        )
-                        raise
-                    if e.status_code == 400:
-                        body_detail = f": {e.body}" if e.body else ""
-                        console.print(f"\n[red]Bad request (400){body_detail}[/]")
-                        raise
-                    if _is_rate_limit(e):
-                        rate_limit_retries += 1
-                        if rate_limit_retries > MAX_RATE_LIMIT_RETRIES:
-                            console.print(
-                                f"\n[red]Rate limited "
-                                f"{MAX_RATE_LIMIT_RETRIES} times. "
-                                f"Aborting.[/]"
-                            )
-                            raise
-                        wait = (2**rate_limit_retries) + random.uniform(0, 2)
-                        console.print(
-                            f"\n[yellow]Rate limited. Waiting {wait:.1f}s "
-                            f"(attempt {rate_limit_retries}/"
-                            f"{MAX_RATE_LIMIT_RETRIES})...[/]"
-                        )
-                        await asyncio.sleep(wait)
-                        continue
-                    if _is_timeout(e) or e.status_code >= 500:
-                        server_error_retries += 1
-                        if server_error_retries > MAX_SERVER_ERROR_RETRIES:
-                            console.print(
-                                f"\n[red]Server error persists after "
-                                f"{MAX_SERVER_ERROR_RETRIES} retries. "
-                                f"Aborting.[/]"
-                            )
-                            raise
-                        wait = (2**server_error_retries) + random.uniform(0, 1)
-                        label = (
-                            "Timeout"
-                            if _is_timeout(e)
-                            else f"Server error {e.status_code}"
-                        )
-                        console.print(
-                            f"\n[yellow]{label}. Retrying in {wait:.1f}s "
-                            f"(attempt {server_error_retries}/"
-                            f"{MAX_SERVER_ERROR_RETRIES})...[/]"
-                        )
-                        await asyncio.sleep(wait)
-                        continue
-                    # Unknown HTTP errors (3xx, other 4xx) → fail fast
-                    console.print(f"\n[red]HTTP error {e.status_code}: {e}[/]")
-                    raise
-                except UnexpectedModelBehavior as e:
-                    batch_retries += 1
-                    cause = e.__cause__
-                    cause_msg = f": {cause}" if cause is not None else ""
-                    if batch_retries < BATCH_MAX_RETRIES:
-                        _rollback_batch()
-                        console.print(
-                            f"\n[yellow]Output validation failed{cause_msg}. "
-                            f"Retrying batch "
-                            f"({batch_retries}/{BATCH_MAX_RETRIES})...[/]"
-                        )
-                        continue
-                    console.print(
-                        f"\n[red]Output validation failed after "
-                        f"{BATCH_MAX_RETRIES} retries{cause_msg}. "
-                        f"Skipping {len(batch)} unit(s).[/]"
-                    )
-                    _commit_batch()
-                    next_start_index += len(batch)
-                    batch = []
-                    char_count = 0
-                    batch_retries = 0
+        for unit in units:
+            if len(batch) >= batch_size:
+                await _flush_batch()
+            batch.append(unit)
 
-            i += 1
+        # Flush remaining units inside the progress context so the
+        # final batch's streaming updates are rendered.
+        if batch:
+            await _flush_batch()
 
 
 def _run_translation(
@@ -560,7 +616,7 @@ def _run_translation(
     translator,
     output_path: str,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     verbose: bool,
     progress_label: str,
     *,
@@ -581,7 +637,7 @@ def _run_translation(
             translator=translator,
             output_path=output_path,
             context_file=context_file,
-            context_length=context_length,
+            batch_size=batch_size,
             verbose=verbose,
             progress_label=progress_label,
             api_key=api_key,
@@ -641,7 +697,7 @@ def translate_po(
     verbose: bool,
     output_path: str,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     *,
     api_key: str | None = None,
     api_host: str | None = None,
@@ -682,9 +738,7 @@ def translate_po(
     untranslated = _order_units(untranslated, order)
 
     plural_tags = (
-        po_file.get_plural_tags()
-        if hasattr(po_file, "get_plural_tags")
-        else None
+        po_file.get_plural_tags() if hasattr(po_file, "get_plural_tags") else None
     )
 
     _run_translation(
@@ -696,7 +750,7 @@ def translate_po(
         translator=translator,
         output_path=output_path,
         context_file=context_file,
-        context_length=context_length,
+        batch_size=batch_size,
         verbose=verbose,
         progress_label=os.path.basename(output_path),
         api_key=api_key,
@@ -715,7 +769,7 @@ def translate_po_dir(
     target_lang: str,
     verbose: bool,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     jobs: int = 4,
     *,
     api_key: str | None = None,
@@ -747,7 +801,7 @@ def translate_po_dir(
                 verbose,
                 po_path,
                 context_file,
-                context_length,
+                batch_size,
                 api_key=api_key,
                 api_host=api_host,
                 temperature=temperature,
@@ -769,7 +823,7 @@ def translate_xliff_file(
     verbose: bool,
     output_path: str,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     *,
     api_key: str | None = None,
     api_host: str | None = None,
@@ -810,6 +864,10 @@ def translate_xliff_file(
 
     untranslated = _order_units(untranslated, order)
 
+    plural_tags = (
+        xlf.get_plural_tags() if hasattr(xlf, "get_plural_tags") else None
+    )
+
     _run_translation(
         store=xlf,
         units=untranslated,
@@ -819,7 +877,7 @@ def translate_xliff_file(
         translator=translator,
         output_path=output_path,
         context_file=context_file,
-        context_length=context_length,
+        batch_size=batch_size,
         verbose=verbose,
         progress_label=os.path.basename(output_path),
         api_key=api_key,
@@ -827,6 +885,7 @@ def translate_xliff_file(
         temperature=temperature,
         progress=progress,
         profile=profile,
+        plural_tags=plural_tags,
     )
 
 
@@ -837,7 +896,7 @@ def translate_xliff_dir(
     target_lang: str,
     verbose: bool,
     context_file: str | None,
-    context_length: int,
+    batch_size: int,
     jobs: int = 4,
     *,
     api_key: str | None = None,
@@ -869,7 +928,7 @@ def translate_xliff_dir(
                 verbose,
                 xliff_path,
                 context_file,
-                context_length,
+                batch_size,
                 api_key=api_key,
                 api_host=api_host,
                 temperature=temperature,

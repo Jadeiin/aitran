@@ -43,7 +43,7 @@ dependencies = [
     "translate-toolkit>=3.14",
     "click>=8.1",
     "platformdirs>=4.0",
-    "pydantic-ai-slim[anthropic,logfire,openai]>=1.0",
+    "pydantic-ai-slim[anthropic,logfire,openai,retries]>=1.0",
     "rich>=13.0",
     "wlc>=2.0.0",
     "crowdin-api-client>=1.26.0",
@@ -93,7 +93,7 @@ future-annotations = true
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D", "DOC"]
-"src/aitran/prompts/**" = ["E501", "RUF067"]
+"src/aitran/agents/**" = ["E501"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
