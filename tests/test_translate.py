@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from importlib.metadata import version as package_version
 
+import httpx
 import pytest
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import FunctionModel
@@ -18,6 +19,7 @@ from aitran.agents import (
     TranslatedUnit,
     TranslationDeps,
     build_model,
+    build_retrying_http_client,
     build_translation_input_xml,
     build_translator_agent,
 )
@@ -659,6 +661,30 @@ def test_build_model_anthropic_provider():
 def test_build_model_openai_provider():
     m = build_model(DEFAULT_TEST_MODEL, api_key="sk-test")
     assert isinstance(m, OpenAIChatModel)
+
+
+async def test_retrying_http_client_retries_rate_limits():
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(
+                429,
+                headers={"retry-after": "0"},
+                request=request,
+            )
+        return httpx.Response(200, text="ok", request=request)
+
+    client = build_retrying_http_client(httpx.MockTransport(handler))
+    try:
+        response = await client.get("https://example.test/")
+    finally:
+        await client.aclose()
+
+    assert response.status_code == 200
+    assert attempts == 2
 
 
 # ── Agent instructions injection ────────────────────────────────────

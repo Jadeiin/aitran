@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pydantic_ai.retries import AsyncTenacityTransport
 from translate.storage import po
 
-from aitran.review import _run_review_async
+from aitran.review import _run_review_async, build_default_reviewer
 from aitran.translate import PoTranslator
 
 if TYPE_CHECKING:
@@ -15,6 +16,14 @@ if TYPE_CHECKING:
 
 def _po(content: str) -> po.pofile:
     return po.pofile.parsestring(content.encode())
+
+
+def test_default_reviewer_uses_retrying_http_transport():
+    agent = build_default_reviewer("openai:gpt-4o-mini", api_key="test-key")
+    provider = agent.model.__dict__["_provider"]
+    openai_client = provider.__dict__["_client"]
+
+    assert isinstance(openai_client._client._transport, AsyncTenacityTransport)
 
 
 async def test_run_review_saves_output_when_all_units_are_clean(tmp_path: Path):

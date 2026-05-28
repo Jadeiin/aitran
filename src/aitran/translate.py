@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import os
-import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, ClassVar
 
-from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
 from translate.misc import quote, xml_helpers
@@ -68,14 +67,6 @@ def _read_context(context_file: str | None) -> str:
         return ""
     with open(context_file, encoding="utf-8") as f:
         return f.read().strip()
-
-
-def _is_rate_limit(exc: ModelHTTPError) -> bool:
-    return exc.status_code == 429
-
-
-def _is_timeout(exc: ModelHTTPError) -> bool:
-    return exc.status_code in (408, 504)
 
 
 def _last_translator() -> str:
@@ -494,19 +485,10 @@ async def _run_translation_async(
     next_start_index = 1
     batch_retries = 0
     BATCH_MAX_RETRIES = 3
-    rate_limit_retries = 0
-    MAX_RATE_LIMIT_RETRIES = 5
-    server_error_retries = 0
-    MAX_SERVER_ERROR_RETRIES = 3
 
     async def _flush_batch() -> None:
-        """Flush current batch with retry logic for transient errors.
-
-        Raises:
-            ModelHTTPError: On fatal HTTP errors (401, 403, 400) or when
-                retry limits for rate-limit / server errors are exhausted.
-        """
-        nonlocal batch_retries, rate_limit_retries, server_error_retries
+        """Flush current batch and apply translations."""
+        nonlocal batch_retries
         nonlocal next_start_index, batch
         while True:
             deps = TranslationDeps(
@@ -535,60 +517,7 @@ async def _run_translation_async(
                 next_start_index += len(batch)
                 batch = []
                 batch_retries = 0
-                rate_limit_retries = 0
-                server_error_retries = 0
                 return
-            except ModelHTTPError as e:
-                if e.status_code in (401, 403):
-                    console.print(
-                        f"\n[red]Authentication error {e.status_code}. "
-                        f"Check your API key.[/]"
-                    )
-                    raise
-                if e.status_code == 400:
-                    body_detail = f": {e.body}" if e.body else ""
-                    console.print(f"\n[red]Bad request (400){body_detail}[/]")
-                    raise
-                if _is_rate_limit(e):
-                    rate_limit_retries += 1
-                    if rate_limit_retries > MAX_RATE_LIMIT_RETRIES:
-                        console.print(
-                            f"\n[red]Rate limited "
-                            f"{MAX_RATE_LIMIT_RETRIES} times. "
-                            f"Aborting.[/]"
-                        )
-                        raise
-                    wait = (2**rate_limit_retries) + random.uniform(0, 2)
-                    console.print(
-                        f"\n[yellow]Rate limited. Waiting {wait:.1f}s "
-                        f"(attempt {rate_limit_retries}/"
-                        f"{MAX_RATE_LIMIT_RETRIES})...[/]"
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-                if _is_timeout(e) or e.status_code >= 500:
-                    server_error_retries += 1
-                    if server_error_retries > MAX_SERVER_ERROR_RETRIES:
-                        console.print(
-                            f"\n[red]Server error persists after "
-                            f"{MAX_SERVER_ERROR_RETRIES} retries. "
-                            f"Aborting.[/]"
-                        )
-                        raise
-                    wait = (2**server_error_retries) + random.uniform(0, 1)
-                    label = (
-                        "Timeout" if _is_timeout(e) else f"Server error {e.status_code}"
-                    )
-                    console.print(
-                        f"\n[yellow]{label}. Retrying in {wait:.1f}s "
-                        f"(attempt {server_error_retries}/"
-                        f"{MAX_SERVER_ERROR_RETRIES})...[/]"
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-                # Unknown HTTP errors (3xx, other 4xx) → fail fast
-                console.print(f"\n[red]HTTP error {e.status_code}: {e}[/]")
-                raise
             except UnexpectedModelBehavior as e:
                 batch_retries += 1
                 cause = e.__cause__
@@ -610,8 +539,6 @@ async def _run_translation_async(
                 next_start_index += len(batch)
                 batch = []
                 batch_retries = 0
-                rate_limit_retries = 0
-                server_error_retries = 0
                 return
 
     with progress if owns_progress else nullcontext():

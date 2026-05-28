@@ -8,12 +8,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers import infer_provider_class
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
 from pydantic_ai.settings import ModelSettings
+from tenacity import retry_if_exception_type, stop_after_attempt, wait_exponential
 from translate.lang import data as lang_data
 from translate.misc import xml_helpers
 
@@ -89,6 +92,44 @@ def format_language_label(code: str) -> str:
     return f"{code} - {name}"
 
 
+def _raise_for_retryable_status(response: httpx.Response) -> None:
+    if response.status_code in (408, 429) or response.status_code >= 500:
+        response.raise_for_status()
+
+
+def build_retrying_http_client(
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> httpx.AsyncClient:
+    """Build an async HTTP client with provider-level transient retries.
+
+    Args:
+        transport: Optional base transport to wrap. Defaults to HTTPX's async
+            transport.
+
+    Returns:
+        HTTPX async client using Pydantic AI's tenacity retry transport.
+    """
+    transport = AsyncTenacityTransport(
+        RetryConfig(
+            retry=retry_if_exception_type((
+                httpx.HTTPStatusError,
+                httpx.TimeoutException,
+                httpx.ConnectError,
+                httpx.ReadError,
+            )),
+            wait=wait_retry_after(
+                fallback_strategy=wait_exponential(multiplier=1, max=20),
+                max_wait=300,
+            ),
+            stop=stop_after_attempt(5),
+            reraise=True,
+        ),
+        wrapped=transport,
+        validate_response=_raise_for_retryable_status,
+    )
+    return httpx.AsyncClient(transport=transport)
+
+
 def build_model(
     model_spec: str,
     *,
@@ -127,8 +168,11 @@ def build_model(
 
     # Anthropic needs specialised model class + caching settings
     if provider_name == "anthropic":
-        anthropic_provider = (
-            AnthropicProvider(api_key=api_key) if api_key else AnthropicProvider()
+        anthropic_kwargs = {"http_client": build_retrying_http_client()}
+        if api_key is not None:
+            anthropic_kwargs["api_key"] = api_key
+        anthropic_provider = AnthropicProvider(
+            **anthropic_kwargs,
         )
         return AnthropicModel(
             model_name,
@@ -146,9 +190,13 @@ def build_model(
         provider_cls = infer_provider_class(provider_name)
     except ValueError:
         # Unknown provider → OpenAI-compatible gateway with custom base_url
-        provider = OpenAIProvider(api_key=api_key, base_url=base_url)
+        provider = OpenAIProvider(
+            api_key=api_key,
+            base_url=base_url,
+            http_client=build_retrying_http_client(),
+        )
     else:
-        provider_kwargs: dict = {}
+        provider_kwargs: dict = {"http_client": build_retrying_http_client()}
         if api_key is not None:
             provider_kwargs["api_key"] = api_key
         if provider_name in ("openai", "openai-chat") and base_url is not None:
