@@ -43,12 +43,15 @@ dependencies = [
     "translate-toolkit>=3.14",
     "click>=8.1",
     "platformdirs>=4.0",
-    "pydantic-ai-slim[anthropic,logfire,openai,retries]>=1.0",
-    "mlflow>=3.1",
+    "pydantic-ai-slim[anthropic,openai,retries]>=1.0",
     "rich>=13.0",
     "wlc>=2.0.0",
     "crowdin-api-client>=1.26.0",
 ]
+
+[project.optional-dependencies]
+logfire = ["pydantic-ai-slim[logfire]>=1.0"]
+mlflow = ["mlflow-tracing>=3.1"]
 
 [project.scripts]
 aitran = "aitran.cli:app"
