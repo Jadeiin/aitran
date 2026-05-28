@@ -16,6 +16,7 @@ from translate.misc.multistring import multistring
 from translate.storage import po
 
 from aitran.agents import (
+    ReviewedUnit,
     TranslatedUnit,
     TranslationDeps,
     build_model,
@@ -699,6 +700,130 @@ def test_xliff_apply_batch_clean_state():
     )
     out = bytes(xf).decode()
     assert 'state="translated"' in out
+
+
+# ── PoXliff plural support ──────────────────────────────────────────
+
+
+_POXLIFF_PLURAL_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.1" xmlns="urn:oasis:names:tc:xliff:document:1.1"
+       datatype="po" source-language="en" target-language="ar">
+  <file original="test.po" datatype="po">
+    <body>
+      <trans-unit id="singular" xml:space="preserve">
+        <source>Check the console for a link.</source>
+        <target/>
+      </trans-unit>
+      <group restype="x-gettext-plurals" id="aaa" xml:space="preserve">
+        <trans-unit xml:space="preserve" id="aaa[0]">
+          <source>%d file</source>
+          <target/>
+        </trans-unit>
+        <trans-unit xml:space="preserve" id="aaa[1]">
+          <source>%d files</source>
+          <target/>
+        </trans-unit>
+      </group>
+      <group restype="x-gettext-plurals" id="bbb" xml:space="preserve">
+        <trans-unit xml:space="preserve" id="bbb[0]">
+          <source>%d item</source>
+          <target state="translated">item translated</target>
+        </trans-unit>
+        <trans-unit xml:space="preserve" id="bbb[1]">
+          <source>%d items</source>
+          <target/>
+        </trans-unit>
+      </group>
+      <group restype="x-gettext-plurals" id="ccc" xml:space="preserve">
+        <trans-unit xml:space="preserve" id="ccc[0]">
+          <source>%d message</source>
+          <target state="translated">message translated</target>
+        </trans-unit>
+        <trans-unit xml:space="preserve" id="ccc[1]">
+          <source>%d messages</source>
+          <target state="translated">messages translated</target>
+        </trans-unit>
+      </group>
+    </body>
+  </file>
+</xliff>
+""".encode()
+
+
+def test_poxliff_get_untranslated_plural():
+    from translate.storage import poxliff
+
+    xlf = poxliff.PoXliffFile.parsestring(_POXLIFF_PLURAL_XML)
+    untranslated = XliffTranslator.get_untranslated(xlf)
+    ids = [u.xmlelement.get("id") for u in untranslated]
+    # aaa: all forms empty → untranslated
+    # bbb: second form empty → untranslated
+    # ccc: both forms filled → translated
+    assert "aaa" in ids
+    assert "bbb" in ids
+    assert "ccc" not in ids
+
+
+def test_poxliff_apply_batch_plural():
+    from translate.storage import poxliff
+
+    xlf = poxliff.PoXliffFile.parsestring(_POXLIFF_PLURAL_XML)
+    unit = xlf.units[1]  # group 1 (plural)
+    assert unit.hasplural()
+
+    XliffTranslator.apply_batch(
+        xlf,
+        [unit],
+        [
+            TranslatedUnit(
+                index=0, targets=["one file translated", "many files translated"],
+                fuzzy=False,
+            ),
+        ],
+    )
+    targets = unit.target.strings
+    assert targets[0] == "one file translated"
+    assert targets[1] == "many files translated"
+
+
+def test_poxliff_apply_batch_plural_fuzzy_on_count_mismatch():
+    from translate.storage import poxliff
+
+    xlf = poxliff.PoXliffFile.parsestring(_POXLIFF_PLURAL_XML)
+    unit = xlf.units[1]  # group 1 (plural)
+
+    XliffTranslator.apply_batch(
+        xlf,
+        [unit],
+        [
+            TranslatedUnit(index=0, targets=["only one form"], fuzzy=False),
+        ],
+    )
+    out = bytes(xlf).decode()
+    assert "needs-review" in out
+
+
+def test_poxliff_apply_review_batch_plural_auto_fix():
+    from translate.storage import poxliff
+
+    xlf = poxliff.PoXliffFile.parsestring(_POXLIFF_PLURAL_XML)
+    unit = xlf.units[2]  # group 2: form 0 translated, form 1 empty
+    assert unit.hasplural()
+
+    units_by_index = {0: unit}
+    XliffTranslator.apply_review_batch(
+        xlf,
+        units_by_index,
+        [
+            ReviewedUnit(index=0, verdict="revise", corrected="corrected item"),
+        ],
+        auto_fix=True,
+    )
+    targets = unit.target.strings
+    # form 0 gets the correction; form 1 is preserved (empty)
+    assert targets[0] == "corrected item"
+    assert targets[1] == ""
 
 
 # ── build_model ────────────────────────────────────────────────────

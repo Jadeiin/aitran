@@ -260,16 +260,31 @@ class XliffTranslator:
     def get_untranslated(cls, xlf: xliff.xlifffile) -> list[xliff.xliffunit]:
         """Return units that need translation."""
         result: list[xliff.xliffunit] = []
+        plural_tags = xlf.get_plural_tags()
         for unit in xlf.units:
             if not cls._get_translate_flag(unit):
                 continue
             state = cls._get_state(unit).lower()
-            target = (unit.target or "").strip()
-            source = (unit.source or "").strip()
 
             if state.startswith("needs-") or state == "new":
                 result.append(unit)
                 continue
+
+            # Plural units: check all forms individually.
+            if unit.hasplural() and len(plural_tags) > 1:
+                targets = (
+                    unit.target.strings
+                    if hasattr(unit.target, "strings")
+                    else [str(unit.target or "")]
+                )
+                if len(targets) < len(plural_tags) or any(
+                    not t.strip() for t in targets
+                ):
+                    result.append(unit)
+                continue
+
+            target = (unit.target or "").strip()
+            source = (unit.source or "").strip()
             if not target:
                 result.append(unit)
                 continue
@@ -281,15 +296,27 @@ class XliffTranslator:
 
     @staticmethod
     def apply_batch(
-        _xlf: xliff.xlifffile,
+        xlf: xliff.xlifffile,
         units: list[xliff.xliffunit],
         results: list[TranslatedUnit],
     ) -> None:
         """Apply translation results to XLIFF units."""
+        plural_tags = xlf.get_plural_tags()
         for unit, result in zip(units, results, strict=True):
-            unit.settarget(safe_prompt_text(result.targets[0]))
+            cleaned = [safe_prompt_text(t) for t in result.targets]
+            if unit.hasplural():
+                if len(cleaned) != len(plural_tags):
+                    result.fuzzy = True
+                unit.settarget(multistring(cleaned))
+            else:
+                unit.settarget(cleaned[0])
             if result.fuzzy:
                 unit.markreviewneeded()
+                # PoXliffUnit.markreviewneeded() does not propagate to
+                # child trans-units unlike marktranslated/markfuzzy.
+                if unit.hasplural():
+                    for child in unit.units:
+                        child.markreviewneeded()
             else:
                 unit.marktranslated()
             if result.note:
@@ -312,15 +339,26 @@ class XliffTranslator:
         for result in results:
             unit = units_by_index[result.index]
             if auto_fix and result.corrected is not None:
-                unit.settarget(
-                    _decode_serialized_markup(
-                        str(unit.source),
-                        safe_prompt_text(result.corrected),
-                    )
+                corrected = _decode_serialized_markup(
+                    str(unit.source),
+                    safe_prompt_text(result.corrected),
                 )
-                unit.marktranslated()
+                if unit.hasplural():
+                    existing = (
+                        unit.target.strings
+                        if hasattr(unit.target, "strings")
+                        else [str(unit.target)]
+                    )
+                    unit.settarget(multistring([corrected, *existing[1:]]))
+                    unit.markfuzzy(True)
+                else:
+                    unit.settarget(corrected)
+                    unit.marktranslated()
             else:
                 unit.markreviewneeded()
+                if unit.hasplural():
+                    for child in unit.units:
+                        child.markreviewneeded()
             if result.note:
                 unit.addnote(
                     f"(review) {result.verdict}: {result.note}",
