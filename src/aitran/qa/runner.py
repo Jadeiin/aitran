@@ -100,6 +100,4 @@ class QARunner:
         Returns:
             One :class:`UnitQAReport` per unit, in the same order.
         """
-        return [
-            self.check_unit(u, start_index + i) for i, u in enumerate(units)
-        ]
+        return [self.check_unit(u, start_index + i) for i, u in enumerate(units)]

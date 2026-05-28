@@ -13,12 +13,12 @@ from translate.filters.checks import (
 # StandardChecker + StandardUnitChecker is enabled — the LLM reviewer
 # decides which failures are real.
 DEFAULT_EXCLUDE: set[str] = {
-    "spellcheck",           # dictionary-based, high false-positive rate
-    "validchars",           # encoding issues, not translation quality
+    "spellcheck",  # dictionary-based, high false-positive rate
+    "validchars",  # encoding issues, not translation quality
     "compendiumconflicts",  # merge-tool artefact, irrelevant for LLM review
-    "credits",              # source-credits metadata, not a translation check
-    "kdecomments",          # KDE-specific comment format
-    "hassuggestion",        # internal tool state, not a quality signal
+    "credits",  # source-credits metadata, not a translation check
+    "kdecomments",  # KDE-specific comment format
+    "hassuggestion",  # internal tool state, not a quality signal
 }
 
 # Severity labels for the four translate-toolkit categories.

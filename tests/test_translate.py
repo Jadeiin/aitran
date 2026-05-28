@@ -26,6 +26,7 @@ from aitran.agents import (
 from aitran.translate import (
     PoTranslator,
     XliffTranslator,
+    _run_translation_async,
     _translate_batch,
     translate_po,
     translate_po_dir,
@@ -563,6 +564,64 @@ def test_translate_po_updates_last_translator_with_package_version(
     assert f"Last-Translator: aitran v{package_version('aitran')}" in out
     assert "Jane Doe <jane@example.com>" not in out
     assert "aitran v0.1.0" not in out
+
+
+async def test_translation_preserves_completed_batches_after_later_failure(
+    monkeypatch, tmp_path
+):
+    source = tmp_path / "messages.po"
+    source.write_text(
+        (
+            'msgid ""\n'
+            'msgstr ""\n'
+            '"Language: zh_CN\\n"\n'
+            '"Content-Type: text/plain; charset=UTF-8\\n"\n'
+            "\n"
+            'msgid "Hello"\n'
+            'msgstr ""\n'
+            "\n"
+            'msgid "World"\n'
+            'msgstr ""\n'
+        ),
+        encoding="utf-8",
+    )
+    po_file = PoTranslator.parse(str(source))
+    units = PoTranslator.get_untranslated(po_file)
+    output_path = tmp_path / "out.po"
+    calls = 0
+
+    async def fake_translate_batch(*_args, **_kwargs):  # noqa: RUF029
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [TranslatedUnit(index=1, targets=["你好"], fuzzy=False)]
+        raise RuntimeError("later batch failed")
+
+    monkeypatch.setattr(
+        "aitran.translate.build_model", lambda *_args, **_kwargs: TestModel()
+    )
+    monkeypatch.setattr("aitran.translate._translate_batch", fake_translate_batch)
+
+    with pytest.raises(RuntimeError, match="later batch failed"):
+        await _run_translation_async(
+            store=po_file,
+            units=units,
+            source_lang="en",
+            target_lang="zh_CN",
+            model_spec=DEFAULT_TEST_MODEL,
+            translator=PoTranslator(),
+            output_path=str(output_path),
+            context_file=None,
+            batch_size=1,
+            verbose=False,
+            progress_label="messages.po",
+        )
+
+    out = output_path.read_text(encoding="utf-8")
+    assert 'msgid "Hello"' in out
+    assert 'msgstr "你好"' in out
+    assert 'msgid "World"' in out
+    assert 'msgstr ""' in out
 
 
 # ── XliffTranslator apply_batch ───────────────────────────────────

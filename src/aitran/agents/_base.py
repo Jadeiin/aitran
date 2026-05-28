@@ -92,6 +92,15 @@ def format_language_label(code: str) -> str:
     return f"{code} - {name}"
 
 
+def fmt_base_url(api_host: str | None) -> str | None:
+    """Build a ``/v1`` API base URL from a raw host string.
+
+    Returns:
+        ``https://host/v1`` or ``None`` when no host is given.
+    """
+    return (api_host.rstrip("/") + "/v1") if api_host else None
+
+
 def _raise_for_retryable_status(response: httpx.Response) -> None:
     if response.status_code in (408, 429) or response.status_code >= 500:
         response.raise_for_status()
@@ -169,7 +178,6 @@ def build_model(
         )
     provider_name, model_name = model_spec.split(":", 1)
 
-    # Anthropic needs specialised model class + caching settings
     if provider_name == "anthropic":
         anthropic_kwargs = {"http_client": build_retrying_http_client()}
         if api_key is not None:
@@ -187,8 +195,6 @@ def build_model(
             ),
         )
 
-    # All other providers → OpenAIChatModel (accepts any OpenAI-compatible
-    # provider).  Use pydantic-ai's built-in provider class dispatch.
     try:
         provider_cls = infer_provider_class(provider_name)
     except ValueError:

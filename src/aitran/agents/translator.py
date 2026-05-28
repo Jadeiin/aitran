@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, ModelRetry, format_as_xml
@@ -131,7 +131,7 @@ def build_translation_input_xml(
     units: list,
     start_index: int,
     *,
-    profile: str = "full",
+    profile: Literal["fast", "full"] = "full",
     plural_tags: list[str] | None = None,
 ) -> str:
     """Format translation units as XML for the translator agent.

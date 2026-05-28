@@ -1,7 +1,6 @@
 """Tests for the reviewer agent."""
 
 from pydantic_ai.models.test import TestModel
-from translate.storage.po import pofile
 
 from aitran.agents.reviewer import (
     ReviewBatch,
@@ -11,10 +10,7 @@ from aitran.agents.reviewer import (
     build_reviewer_agent,
 )
 from aitran.qa import UnitQAReport
-
-
-def _po(content: str) -> pofile:
-    return pofile.parsestring(content.encode())
+from tests.helpers import po_parse as _po
 
 
 class TestReviewedUnit:

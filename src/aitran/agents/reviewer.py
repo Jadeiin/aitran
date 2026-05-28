@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, ModelRetry, format_as_xml
@@ -72,7 +72,7 @@ class ReviewedUnit(BaseModel):
     """One review result produced by the agent."""
 
     index: int = Field(description="Index matching the requested unit.")
-    verdict: str = Field(
+    verdict: Literal["revise", "reject"] = Field(
         description=(
             "Review verdict: 'revise' (minor issue, has correction) "
             "or 'reject' (serious issue)."
@@ -190,6 +190,9 @@ def build_reviewer_agent(model: Model) -> Agent[ReviewDeps, ReviewBatch]:
                 f"Unexpected indices {sorted(extra)}. "
                 f"Only return units from the requested set."
             )
+        # Reviewer output is intentionally sparse: units without problems
+        # are simply omitted rather than returned with a "pass" verdict.
+        # We only check for extra indices, not missing ones.
         valid_verdicts = {"revise", "reject"}
         for u in output.units:
             if u.verdict not in valid_verdicts:

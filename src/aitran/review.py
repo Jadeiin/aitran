@@ -7,9 +7,6 @@ import sys
 from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
-from rich.console import Console
-from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
-
 from aitran.agents import (
     ReviewDeps,
     ReviewedUnit,
@@ -17,30 +14,15 @@ from aitran.agents import (
     build_review_input_xml,
     build_reviewer_agent,
 )
+from aitran.agents._base import fmt_base_url
 from aitran.qa import QARunner, UnitQAReport
+from aitran.translate import _build_progress
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent
+    from rich.progress import Progress
 
     from aitran.agents import ReviewBatch
-
-
-def _build_progress(console: Console | None = None) -> Progress:
-    """Create a Rich progress renderer for review runs.
-
-    Returns:
-        Rich progress renderer with file labels.
-    """
-    progress = Progress(
-        TextColumn("[cyan]{task.description}"),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        console=console or Console(),
-    )
-    progress.live.vertical_overflow = "crop"
-    return progress
 
 
 def _filter_review_units(
@@ -63,14 +45,53 @@ def _filter_review_units(
         idx = start_index + i
         report = qa_by_index.get(idx)
         has_qa_errors = report is not None and report.has_errors
-        is_fuzzy = getattr(u, "isfuzzy", lambda: False)()
-        has_notes = bool(getattr(u, "getnotes", lambda: "")().strip())
 
-        if strict or has_qa_errors or is_fuzzy or has_notes:
+        if strict:
             filtered_reports.append(report or UnitQAReport(index=idx))
             filtered_units.append(u)
+        else:
+            is_fuzzy = getattr(u, "isfuzzy", lambda: False)()
+            has_notes = bool(getattr(u, "getnotes", lambda: "")().strip())
+            if has_qa_errors or is_fuzzy or has_notes:
+                filtered_reports.append(report or UnitQAReport(index=idx))
+                filtered_units.append(u)
 
     return filtered_reports, filtered_units
+
+
+async def _review_chunk(
+    agent,
+    units: list,
+    qa_reports: list[UnitQAReport],
+    deps: ReviewDeps,
+    history: list,
+    on_progress=None,
+) -> list[ReviewedUnit]:
+    """Stream one review chunk through the agent.
+
+    Returns:
+        List of ReviewedUnit for units that need revise or reject handling.
+    """
+    user_msg = build_review_input_xml(units, qa_reports)
+    valid_indices = set(deps.expected_indices)
+    seen: set[int] = set()
+
+    async with agent.run_stream(
+        user_msg,
+        deps=deps,
+        message_history=history,
+    ) as run:
+        async for partial in run.stream_output(debounce_by=0.1):
+            for result in partial.units:
+                if result.index in seen or result.index not in valid_indices:
+                    continue
+                seen.add(result.index)
+                if on_progress:
+                    on_progress(result)
+        final = await run.get_output()
+        history.extend(run.new_messages())
+
+    return final.units
 
 
 async def _run_review_async(
@@ -98,7 +119,7 @@ async def _run_review_async(
     Returns:
         Summary counts: ``{"pass": N, "revise": N, "reject": N}``.
     """
-    base_url = (api_host.rstrip("/") + "/v1") if api_host else None
+    base_url = fmt_base_url(api_host)
     agent = build_reviewer_agent(
         build_model(
             model_spec, api_key=api_key, base_url=base_url, temperature=temperature
@@ -130,31 +151,59 @@ async def _run_review_async(
     task_id = progress.add_task("Reviewing", total=review_count)
     history: list = []
     unit_by_index = dict(enumerate(units, start=1))
+    global_done = 0
+    chunk_streamed: set[int] = set()
+    saved_indices: set[int] = set()
 
-    async def _review_chunk(
-        chunk_units: list, chunk_reports: list[UnitQAReport]
-    ) -> list[ReviewedUnit]:
-        """Review a chunk of review-worthy units.
+    def on_review_done(result: ReviewedUnit) -> None:
+        nonlocal global_done
+        idx = result.index
+        if idx in saved_indices or idx in chunk_streamed:
+            return
+        chunk_streamed.add(idx)
+        global_done += 1
+        progress.update(task_id, completed=global_done)
 
-        Returns:
-            List of ReviewedUnit with revise or reject verdicts.
-        """
-        input_xml = build_review_input_xml(chunk_units, chunk_reports)
-        deps = ReviewDeps(
-            source_lang=source_lang,
-            target_lang=target_lang,
-            context="",
-            expected_indices=tuple(r.index for r in chunk_reports),
-        )
-        result = await agent.run(input_xml, deps=deps, message_history=history)
-        history.extend(result.new_messages())
-        return result.output.units
+    def _commit_chunk(chunk_reports: list[UnitQAReport], reviewed: list[ReviewedUnit]):
+        nonlocal global_done
+        reviewed_indices = {r.index for r in reviewed}
+        for result in reviewed:
+            on_review_done(result)
+        pass_count = len(chunk_reports) - len(reviewed_indices)
+        global_done += pass_count
+        saved_indices.update(r.index for r in chunk_reports)
+        chunk_streamed.clear()
+        if pass_count:
+            progress.update(task_id, completed=global_done)
+
+    def _rollback_chunk() -> None:
+        nonlocal global_done
+        global_done -= len(chunk_streamed)
+        chunk_streamed.clear()
+        progress.update(task_id, completed=global_done)
 
     with progress if owns_progress else nullcontext():
         for start in range(0, review_count, batch_size):
             chunk_units = review_units[start : start + batch_size]
             chunk_reports = review_reports[start : start + batch_size]
-            reviewed = await _review_chunk(chunk_units, chunk_reports)
+            deps = ReviewDeps(
+                source_lang=source_lang,
+                target_lang=target_lang,
+                context="",
+                expected_indices=tuple(r.index for r in chunk_reports),
+            )
+            try:
+                reviewed = await _review_chunk(
+                    agent,
+                    chunk_units,
+                    chunk_reports,
+                    deps,
+                    history,
+                    on_review_done,
+                )
+            except Exception:
+                _rollback_chunk()
+                raise
             for r in reviewed:
                 summary[r.verdict] = summary.get(r.verdict, 0) + 1
             summary["pass"] += len(chunk_units) - len(reviewed)
@@ -165,7 +214,7 @@ async def _run_review_async(
                 auto_fix=auto_fix,
             )
             translator.save(store, output_path)
-            progress.update(task_id, advance=len(chunk_units))
+            _commit_chunk(chunk_reports, reviewed)
 
     if owns_progress:
         progress.stop()
@@ -185,7 +234,7 @@ def build_default_reviewer(
     Returns:
         Configured reviewer agent.
     """
-    base_url = (api_host.rstrip("/") + "/v1") if api_host else None
+    base_url = fmt_base_url(api_host)
     model = build_model(
         model_spec, api_key=api_key, base_url=base_url, temperature=temperature
     )

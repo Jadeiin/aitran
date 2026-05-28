@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, ClassVar
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
-from translate.misc import quote, xml_helpers
+from translate.misc import quote
 from translate.misc.multistring import multistring
 from translate.storage import po, xliff
 
@@ -24,6 +24,7 @@ from aitran.agents import (
     build_translation_input_xml,
     build_translator_agent,
 )
+from aitran.agents._base import fmt_base_url, safe_prompt_text
 from aitran.dicts import find_matching_entries
 
 if TYPE_CHECKING:
@@ -159,7 +160,7 @@ class PoTranslator:
         """Apply a batch of agent results."""
         plural_tags = po_file.get_plural_tags()
         for unit, result in zip(units, results, strict=True):
-            cleaned = [xml_helpers.valid_chars_only(t) for t in result.targets]
+            cleaned = [safe_prompt_text(t) for t in result.targets]
             if unit.hasplural():
                 if len(cleaned) != len(plural_tags):
                     result.fuzzy = True
@@ -193,7 +194,7 @@ class PoTranslator:
             if auto_fix and result.corrected is not None:
                 corrected = _decode_serialized_markup(
                     str(unit.source),
-                    xml_helpers.valid_chars_only(result.corrected),
+                    safe_prompt_text(result.corrected),
                 )
                 if unit.hasplural():
                     existing = (
@@ -286,7 +287,7 @@ class XliffTranslator:
     ) -> None:
         """Apply translation results to XLIFF units."""
         for unit, result in zip(units, results, strict=True):
-            unit.settarget(xml_helpers.valid_chars_only(result.targets[0]))
+            unit.settarget(safe_prompt_text(result.targets[0]))
             if result.fuzzy:
                 unit.markreviewneeded()
             else:
@@ -314,7 +315,7 @@ class XliffTranslator:
                 unit.settarget(
                     _decode_serialized_markup(
                         str(unit.source),
-                        xml_helpers.valid_chars_only(result.corrected),
+                        safe_prompt_text(result.corrected),
                     )
                 )
                 unit.marktranslated()
@@ -435,7 +436,7 @@ async def _run_translation_async(
     sources = [u.source for u in units]
     dict_entries = find_matching_entries(sources, target_lang)
 
-    base_url = (api_host.rstrip("/") + "/v1") if api_host else None
+    base_url = fmt_base_url(api_host)
     agent = build_translator_agent(
         build_model(
             model_spec, api_key=api_key, base_url=base_url, temperature=temperature

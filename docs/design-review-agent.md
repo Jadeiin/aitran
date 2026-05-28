@@ -73,9 +73,10 @@ aitran review (--po file.po | --xliff file.xlf) [options]
 ```python
 class ReviewedUnit(BaseModel):
     index: int
-    verdict: str           # "revise" | "reject" (sparse: omitted units implicitly pass)
+    verdict: str  # "revise" | "reject" (sparse: omitted units implicitly pass)
     corrected: str | None  # corrected target (when reviewer can fix)
-    note: str | None       # reason/explanation
+    note: str | None  # reason/explanation
+
 
 class ReviewBatch(BaseModel):
     units: list[ReviewedUnit]

@@ -1,10 +1,6 @@
 """Tests for the QA runner."""
 
-from translate.storage.po import pofile
-
-
-def _po(content: str) -> pofile:
-    return pofile.parsestring(content.encode())
+from tests.helpers import po_parse as _po
 
 
 class TestQARunner:

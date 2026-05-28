@@ -1,13 +1,8 @@
 """Tests for review apply_batch on PO and XLIFF adapters."""
 
-from translate.storage import po
-
 from aitran.agents.reviewer import ReviewedUnit
 from aitran.translate import PoTranslator
-
-
-def _po(content: str) -> po.pofile:
-    return po.pofile.parsestring(content.encode())
+from tests.helpers import po_parse as _po
 
 
 def _indexed(units):

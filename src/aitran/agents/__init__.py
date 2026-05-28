@@ -7,6 +7,7 @@ field helpers) live in ``_base``.
 from aitran.agents._base import (
     build_model,
     build_retrying_http_client,
+    fmt_base_url,
     format_language_label,
     safe_prompt_text,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "build_reviewer_agent",
     "build_translation_input_xml",
     "build_translator_agent",
+    "fmt_base_url",
     "format_language_label",
     "safe_prompt_text",
 ]
