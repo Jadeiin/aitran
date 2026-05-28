@@ -151,7 +151,7 @@ class TestPoReviewApply:
         assert not units[1].isfuzzy()
         assert units[2].isfuzzy()
 
-    def test_auto_fix_plural_preserves_other_forms(self):
+    def test_auto_fix_plural_preserves_other_forms_and_keeps_fuzzy(self):
         pofile = _po(
             "#: src/a.py:1\n"
             'msgid "apple"\n'
@@ -170,7 +170,7 @@ class TestPoReviewApply:
             )
         ]
         PoTranslator.apply_review_batch(pofile, {1: unit}, results, auto_fix=True)
-        assert not unit.isfuzzy()
+        assert unit.isfuzzy()
         targets = unit.target.strings
         assert targets[0] == "修正苹果"
         assert targets[1] == "苹果们"

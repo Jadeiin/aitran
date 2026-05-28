@@ -124,6 +124,7 @@ async def _run_review_async(
     }
     if not review_units:
         print(f"Reviewed {total_count} units, all clean.")
+        translator.save(store, output_path)
         return summary
 
     task_id = progress.add_task("Reviewing", total=review_count)

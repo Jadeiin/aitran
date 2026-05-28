@@ -217,7 +217,7 @@ class PoTranslator:
                     )
                 else:
                     unit.target = corrected
-                unit.markfuzzy(False)
+                unit.markfuzzy(unit.hasplural())
             else:
                 unit.markfuzzy(True)
             if result.note:
