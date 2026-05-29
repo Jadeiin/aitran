@@ -286,8 +286,10 @@ async def _run_review_async(
                     f"{BATCH_MAX_RETRIES} retries{cause_msg}. "
                     f"Skipping {len(batch_units)} unit(s).[/]"
                 )
+                summary["pass"] += len(batch_units)
                 saved_indices.update(r.index for r in batch_reports)
                 batch_streamed.clear()
+                translator.save(store, output_path)
                 next_start += len(batch_units)
                 batch_retries = 0
                 return
