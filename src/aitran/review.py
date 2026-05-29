@@ -190,6 +190,7 @@ async def _run_review_async(
         "pass": total_count - review_count,
         "revise": 0,
         "reject": 0,
+        "skip": 0,
     }
     if not review_units:
         print(f"Reviewed {total_count} units, all clean.")
@@ -286,7 +287,7 @@ async def _run_review_async(
                     f"{BATCH_MAX_RETRIES} retries{cause_msg}. "
                     f"Skipping {len(batch_units)} unit(s).[/]"
                 )
-                summary["pass"] += len(batch_units)
+                summary["skip"] += len(batch_units)
                 saved_indices.update(r.index for r in batch_reports)
                 batch_streamed.clear()
                 translator.save(store, output_path)
@@ -344,7 +345,7 @@ def review_file(
     """
     from aitran.translate import PoTranslator, XliffTranslator
 
-    empty = {"pass": 0, "revise": 0, "reject": 0}
+    empty = {"pass": 0, "revise": 0, "reject": 0, "skip": 0}
     is_po = path.endswith((".po", ".pot"))
 
     if is_po:

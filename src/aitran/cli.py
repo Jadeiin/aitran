@@ -534,7 +534,8 @@ def review(
         f"\nReviewed: {total} units\n"
         f"  pass:   {summary.get('pass', 0)}\n"
         f"  revise: {summary.get('revise', 0)}\n"
-        f"  reject: {summary.get('reject', 0)}"
+        f"  reject: {summary.get('reject', 0)}\n"
+        f"  skip:   {summary.get('skip', 0)}"
     )
 
 

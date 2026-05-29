@@ -41,7 +41,7 @@ async def test_run_review_saves_output_when_all_units_are_clean(tmp_path: Path):
         api_key="test-key",
     )
 
-    assert summary == {"pass": 1, "revise": 0, "reject": 0}
+    assert summary == {"pass": 1, "revise": 0, "reject": 0, "skip": 0}
     assert output_path.exists()
     assert 'msgstr "你好"' in output_path.read_text()
 
