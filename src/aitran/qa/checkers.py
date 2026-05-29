@@ -47,42 +47,34 @@ class _AITranChecker(StandardChecker):
         missing = []
         extra = []
 
-        # (half-width open/close, full-width open/close)
-        bracket_pairs = [
-            ("(", ")", "（", "）"),  # parentheses
-            ("[", "]", "【", "】"),  # square brackets
-            ("{", "}", "｛", "｝"),  # curly braces
-            ("<", ">", "〈", "〉"),  # angle brackets
-            ("<", ">", "《", "》"),  # double angle
-            ("[", "]", "「", "」"),  # CJK corner brackets
-            ("[", "]", "『", "』"),  # CJK white corner
-            ("[", "]", "〔", "〕"),  # tortoise shell
+        # Each group: (tuple of opens, tuple of closes).
+        # All characters in a group are considered equivalent.
+        bracket_groups = [
+            # parentheses
+            (("(", "（"), (")", "）")),
+            # square bracket family
+            (("[", "【", "「", "『", "〔"), ("]", "】", "」", "』", "〕")),
+            # curly braces
+            (("{", "｛"), ("}", "｝")),
+            # angle bracket family
+            (("<", "〈", "《"), (">", "〉", "》")),
         ]
 
-        seen: set[tuple[str, str]] = set()
-        for half_open, half_close, fw_open, fw_close in bracket_pairs:
-            key = (half_open, half_close)
-            if key in seen:
-                continue
-            seen.add(key)
+        for opens, closes in bracket_groups:
+            open1 = sum(str1.count(ch) for ch in opens)
+            close1 = sum(str1.count(ch) for ch in closes)
+            open2 = sum(str2.count(ch) for ch in opens)
+            close2 = sum(str2.count(ch) for ch in closes)
 
-            count1 = (
-                str1.count(half_open)
-                + str1.count(half_close)
-                + str1.count(fw_open)
-                + str1.count(fw_close)
-            )
-            count2 = (
-                str2.count(half_open)
-                + str2.count(half_close)
-                + str2.count(fw_open)
-                + str2.count(fw_close)
-            )
+            if open2 < open1:
+                missing.append(f"'{opens[0]}' open")
+            elif open2 > open1:
+                extra.append(f"'{opens[0]}' open")
 
-            if count2 < count1:
-                missing.append(f"'{half_open}' or equivalent")
-            elif count2 > count1:
-                extra.append(f"'{half_open}' or equivalent")
+            if close2 < close1:
+                missing.append(f"'{closes[0]}' close")
+            elif close2 > close1:
+                extra.append(f"'{closes[0]}' close")
 
         if missing:
             messages.append(f"Missing {', '.join(missing)}")
