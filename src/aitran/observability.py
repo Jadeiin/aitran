@@ -119,4 +119,4 @@ def flush_mlflow(*, enabled: bool) -> None:
     except ImportError:
         return
 
-    mlflow.flush_artifacts()
+    mlflow.flush_trace_async_logging()

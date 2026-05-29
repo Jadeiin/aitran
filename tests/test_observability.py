@@ -59,7 +59,7 @@ def test_setup_mlflow_configures_pydantic_ai(monkeypatch):
         set_tracking_uri=lambda uri: calls.append(("set_tracking_uri", uri)),
         set_experiment=lambda name: calls.append(("set_experiment", name)),
         pydantic_ai=fake_pydantic_ai,
-        flush_artifacts=lambda: calls.append(("flush_artifacts", {})),
+        flush_trace_async_logging=lambda: calls.append(("flush_trace_async_logging", {})),
     )
     monkeypatch.setitem(__import__("sys").modules, "mlflow", fake_mlflow)
     monkeypatch.setattr(observability, "_MLFLOW_CONFIGURED", False)
@@ -78,5 +78,5 @@ def test_setup_mlflow_configures_pydantic_ai(monkeypatch):
         ("set_tracking_uri", "http://localhost:5000"),
         ("set_experiment", "aitran"),
         ("pydantic_ai.autolog", {}),
-        ("flush_artifacts", {}),
+        ("flush_trace_async_logging", {}),
     ]

@@ -1,6 +1,7 @@
 """CLI entry point using click."""
 
 import sys
+from contextlib import contextmanager
 from importlib.resources import files
 
 import click
@@ -139,6 +140,88 @@ def _timeout_option(command):
     )(command)
 
 
+def _observability_options(command):
+    """Apply common observability options (Logfire + MLflow).
+
+    Args:
+        command: Click command function.
+
+    Returns:
+        Decorated command function.
+    """
+    for opt in [
+        click.option(
+            "--mlflow-experiment",
+            envvar="AITRAN_MLFLOW_EXPERIMENT",
+            help="MLflow experiment name (defaults to 'Default').",
+        ),
+        click.option(
+            "--mlflow-tracking-uri",
+            envvar="AITRAN_MLFLOW_TRACKING_URI",
+            help="MLflow tracking server URI (defaults to local ./mlruns).",
+        ),
+        click.option(
+            "--mlflow",
+            is_flag=True,
+            envvar="AITRAN_MLFLOW",
+            help=(
+                "Enable MLflow tracing for agent/model runs. "
+                "Prompts and completions may be logged to MLflow."
+            ),
+        ),
+        click.option(
+            "--logfire-capture-http",
+            is_flag=True,
+            envvar="AITRAN_LOGFIRE_CAPTURE_HTTP",
+            help=(
+                "Also capture provider HTTP headers and bodies in Logfire. "
+                "This may include prompts, completions, and credentials."
+            ),
+        ),
+        click.option(
+            "--logfire",
+            is_flag=True,
+            envvar="AITRAN_LOGFIRE",
+            help=(
+                "Enable Pydantic Logfire tracing for agent/model runs. "
+                "Prompts and completions may be sent to Logfire."
+            ),
+        ),
+    ]:
+        command = opt(command)
+    return command
+
+
+@contextmanager
+def _observability(
+    *, logfire, logfire_capture_http, mlflow, mlflow_tracking_uri, mlflow_experiment
+):
+    """Set up and tear down observability backends.
+
+    Raises:
+        click.ClickException: If an observability backend cannot be configured.
+    """
+    logfire_enabled = False
+    mlflow_enabled = False
+    try:
+        logfire_enabled = setup_logfire(
+            enabled=logfire,
+            capture_http=logfire_capture_http,
+        )
+        mlflow_enabled = setup_mlflow(
+            enabled=mlflow,
+            tracking_uri=mlflow_tracking_uri,
+            experiment=mlflow_experiment,
+        )
+    except ObservabilityError as exc:
+        raise click.ClickException(str(exc)) from exc
+    try:
+        yield
+    finally:
+        flush_logfire(enabled=logfire_enabled)
+        flush_mlflow(enabled=mlflow_enabled)
+
+
 @click.group(context_settings=CONTEXT_SETTINGS)
 @click.version_option(message="%(prog)s %(version)s")
 def app() -> None:
@@ -244,43 +327,7 @@ def app() -> None:
     type=click.Path(),
     help="Output file path",
 )
-@click.option(
-    "--logfire",
-    is_flag=True,
-    envvar="AITRAN_LOGFIRE",
-    help=(
-        "Enable Pydantic Logfire tracing for agent/model runs. "
-        "Prompts and completions may be sent to Logfire."
-    ),
-)
-@click.option(
-    "--logfire-capture-http",
-    is_flag=True,
-    envvar="AITRAN_LOGFIRE_CAPTURE_HTTP",
-    help=(
-        "Also capture provider HTTP headers and bodies in Logfire. "
-        "This may include prompts, completions, and credentials."
-    ),
-)
-@click.option(
-    "--mlflow",
-    is_flag=True,
-    envvar="AITRAN_MLFLOW",
-    help=(
-        "Enable MLflow tracing for agent/model runs. "
-        "Prompts and completions may be logged to MLflow."
-    ),
-)
-@click.option(
-    "--mlflow-tracking-uri",
-    envvar="AITRAN_MLFLOW_TRACKING_URI",
-    help="MLflow tracking server URI (defaults to local ./mlruns).",
-)
-@click.option(
-    "--mlflow-experiment",
-    envvar="AITRAN_MLFLOW_EXPERIMENT",
-    help="MLflow experiment name (defaults to 'Default').",
-)
+@_observability_options
 def translate(
     model: str,
     key: str | None,
@@ -305,11 +352,7 @@ def translate(
     mlflow_tracking_uri: str | None,
     mlflow_experiment: str | None,
 ) -> None:
-    """Translate PO/XLIFF files.
-
-    Raises:
-        click.ClickException: If optional observability setup fails.
-    """
+    """Translate PO/XLIFF files."""
     sources = [po_file, po_dir, xliff_file, xliff_dir]
     if not any(sources):
         click.echo(
@@ -325,36 +368,25 @@ def translate(
         )
         sys.exit(1)
 
-    try:
-        logfire_enabled = setup_logfire(
-            enabled=logfire,
-            capture_http=logfire_capture_http,
-        )
-    except ObservabilityError as exc:
-        raise click.ClickException(str(exc)) from exc
+    with _observability(
+        logfire=logfire,
+        logfire_capture_http=logfire_capture_http,
+        mlflow=mlflow,
+        mlflow_tracking_uri=mlflow_tracking_uri,
+        mlflow_experiment=mlflow_experiment,
+    ):
+        kwargs = {
+            "model": model,
+            "source_lang": source,
+            "target_lang": lang or "",
+            "verbose": verbose,
+            "context_file": context_file,
+            "batch_size": batch_size,
+            "api_key": key,
+            "api_host": host,
+            "temperature": temperature,
+        }
 
-    try:
-        mlflow_enabled = setup_mlflow(
-            enabled=mlflow,
-            tracking_uri=mlflow_tracking_uri,
-            experiment=mlflow_experiment,
-        )
-    except ObservabilityError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    kwargs = {
-        "model": model,
-        "source_lang": source,
-        "target_lang": lang or "",
-        "verbose": verbose,
-        "context_file": context_file,
-        "batch_size": batch_size,
-        "api_key": key,
-        "api_host": host,
-        "temperature": temperature,
-    }
-
-    try:
         if po_file:
             translate_po(
                 po_path=po_file,
@@ -390,9 +422,6 @@ def translate(
         else:
             click.echo("No actionable target specified.", err=True)
             sys.exit(1)
-    finally:
-        flush_logfire(enabled=logfire_enabled)
-        flush_mlflow(enabled=mlflow_enabled)
 
 
 @app.command(
@@ -453,24 +482,7 @@ def translate(
     type=click.Path(),
     help="Output file path (default: overwrite input)",
 )
-@click.option(
-    "--logfire",
-    is_flag=True,
-    envvar="AITRAN_LOGFIRE",
-    help=(
-        "Enable Pydantic Logfire tracing for agent/model runs. "
-        "Prompts and completions may be sent to Logfire."
-    ),
-)
-@click.option(
-    "--logfire-capture-http",
-    is_flag=True,
-    envvar="AITRAN_LOGFIRE_CAPTURE_HTTP",
-    help=(
-        "Also capture provider HTTP headers and bodies in Logfire. "
-        "This may include prompts, completions, and credentials."
-    ),
-)
+@_observability_options
 def review(
     model: str,
     key: str | None,
@@ -486,14 +498,14 @@ def review(
     output: str | None,
     logfire: bool,
     logfire_capture_http: bool,
+    mlflow: bool,
+    mlflow_tracking_uri: str | None,
+    mlflow_experiment: str | None,
 ) -> None:
     """Review translated PO/XLIFF files using QA + LLM.
 
     Runs rule-based QA checks, then sends problematic units to an LLM
     reviewer for final verdict (pass/revise/reject).
-
-    Raises:
-        click.ClickException: If optional observability setup fails.
     """
     if not po_file and not xliff_file:
         click.echo("Error: --po or --xliff is required", err=True)
@@ -502,16 +514,13 @@ def review(
         click.echo("Error: --po and --xliff are mutually exclusive", err=True)
         sys.exit(1)
 
-    logfire_enabled = False
-    try:
-        logfire_enabled = setup_logfire(
-            enabled=logfire,
-            capture_http=logfire_capture_http,
-        )
-    except ObservabilityError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    try:
+    with _observability(
+        logfire=logfire,
+        logfire_capture_http=logfire_capture_http,
+        mlflow=mlflow,
+        mlflow_tracking_uri=mlflow_tracking_uri,
+        mlflow_experiment=mlflow_experiment,
+    ):
         review_path: str = po_file or xliff_file  # guaranteed by mutual-exclusion check
         summary = review_file(
             model=model,
@@ -526,8 +535,6 @@ def review(
             api_host=host,
             temperature=temperature,
         )
-    finally:
-        flush_logfire(enabled=logfire_enabled)
 
     total = sum(summary.values())
     click.echo(
