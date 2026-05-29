@@ -47,6 +47,30 @@ class TestQARunner:
         checker_names = {e.checker for e in report.errors}
         assert "brackets" in checker_names
 
+    def test_fullwidth_bracket_accepted(self):
+        from aitran.qa import QARunner
+
+        po = _po(
+            '#: src/app.py:1\nmsgid "Value (ok)"\nmsgstr "值（好）"\n'
+        )
+        unit = po.units[0]
+        runner = QARunner(target_lang="zh_CN")
+        report = runner.check_unit(unit, index=1)
+        checker_names = {e.checker for e in report.errors}
+        assert "brackets" not in checker_names
+
+    def test_fullwidth_to_halfwidth_bracket_accepted(self):
+        from aitran.qa import QARunner
+
+        po = _po(
+            '#: src/app.py:1\nmsgid "值（好）"\nmsgstr "Value (ok)"\n'
+        )
+        unit = po.units[0]
+        runner = QARunner(target_lang="en")
+        report = runner.check_unit(unit, index=1)
+        checker_names = {e.checker for e in report.errors}
+        assert "brackets" not in checker_names
+
     def test_endpunc_mismatch_detected(self):
         from aitran.qa import QARunner
 
