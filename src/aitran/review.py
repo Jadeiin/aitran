@@ -7,6 +7,8 @@ import sys
 from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
+from pydantic_ai.exceptions import UnexpectedModelBehavior
+
 from aitran.agents import (
     ReviewDeps,
     ReviewedUnit,
@@ -89,7 +91,7 @@ def _pre_filter_by_markers(
     return marked_reports, marked_units, qa_indices
 
 
-async def _review_chunk(
+async def _review_batch(
     agent,
     units: list,
     qa_reports: list[UnitQAReport],
@@ -97,7 +99,7 @@ async def _review_chunk(
     history: list,
     on_progress=None,
 ) -> list[ReviewedUnit]:
-    """Stream one review chunk through the agent.
+    """Stream one review batch through the agent.
 
     Returns:
         List of ReviewedUnit for units that need revise or reject handling.
@@ -198,69 +200,101 @@ async def _run_review_async(
     history: list = []
     unit_by_index = dict(enumerate(units, start=1))
     global_done = 0
-    chunk_streamed: set[int] = set()
+    batch_streamed: set[int] = set()
     saved_indices: set[int] = set()
 
     def on_review_done(result: ReviewedUnit) -> None:
         nonlocal global_done
         idx = result.index
-        if idx in saved_indices or idx in chunk_streamed:
+        if idx in saved_indices or idx in batch_streamed:
             return
-        chunk_streamed.add(idx)
+        batch_streamed.add(idx)
         global_done += 1
         progress.update(task_id, completed=global_done)
 
-    def _commit_chunk(chunk_reports: list[UnitQAReport], reviewed: list[ReviewedUnit]):
+    def _commit_batch(batch_reports: list[UnitQAReport], reviewed: list[ReviewedUnit]):
         nonlocal global_done
         reviewed_indices = {r.index for r in reviewed}
         for result in reviewed:
             on_review_done(result)
-        pass_count = len(chunk_reports) - len(reviewed_indices)
+        pass_count = len(batch_reports) - len(reviewed_indices)
         global_done += pass_count
-        saved_indices.update(r.index for r in chunk_reports)
-        chunk_streamed.clear()
+        saved_indices.update(r.index for r in batch_reports)
+        batch_streamed.clear()
         if pass_count:
             progress.update(task_id, completed=global_done)
 
-    def _rollback_chunk() -> None:
+    def _rollback_batch() -> None:
         nonlocal global_done
-        global_done -= len(chunk_streamed)
-        chunk_streamed.clear()
+        global_done -= len(batch_streamed)
+        batch_streamed.clear()
         progress.update(task_id, completed=global_done)
 
-    with progress if owns_progress else nullcontext():
-        for start in range(0, review_count, batch_size):
-            chunk_units = review_units[start : start + batch_size]
-            chunk_reports = review_reports[start : start + batch_size]
-            deps = ReviewDeps(
-                source_lang=source_lang,
-                target_lang=target_lang,
-                context="",
-                expected_indices=tuple(r.index for r in chunk_reports),
-            )
+    next_start = 0
+    batch_retries = 0
+    BATCH_MAX_RETRIES = 3
+    console = progress.console
+
+    async def _flush_batch() -> None:
+        nonlocal batch_retries, next_start
+        batch_units = review_units[next_start : next_start + batch_size]
+        batch_reports = review_reports[next_start : next_start + batch_size]
+        deps = ReviewDeps(
+            source_lang=source_lang,
+            target_lang=target_lang,
+            context="",
+            expected_indices=tuple(r.index for r in batch_reports),
+        )
+        while True:
             try:
-                reviewed = await _review_chunk(
+                reviewed = await _review_batch(
                     agent,
-                    chunk_units,
-                    chunk_reports,
+                    batch_units,
+                    batch_reports,
                     deps,
                     history,
                     on_review_done,
                 )
-            except Exception:
-                _rollback_chunk()
-                raise
-            for r in reviewed:
-                summary[r.verdict] = summary.get(r.verdict, 0) + 1
-            summary["pass"] += len(chunk_units) - len(reviewed)
-            translator.apply_review_batch(
-                store,
-                unit_by_index,
-                reviewed,
-                auto_fix=auto_fix,
-            )
-            translator.save(store, output_path)
-            _commit_chunk(chunk_reports, reviewed)
+                for r in reviewed:
+                    summary[r.verdict] = summary.get(r.verdict, 0) + 1
+                summary["pass"] += len(batch_units) - len(reviewed)
+                translator.apply_review_batch(
+                    store,
+                    unit_by_index,
+                    reviewed,
+                    auto_fix=auto_fix,
+                )
+                translator.save(store, output_path)
+                _commit_batch(batch_reports, reviewed)
+                next_start += len(batch_units)
+                batch_retries = 0
+                return
+            except UnexpectedModelBehavior as e:
+                batch_retries += 1
+                cause = e.__cause__
+                cause_msg = f": {cause}" if cause is not None else ""
+                if batch_retries < BATCH_MAX_RETRIES:
+                    _rollback_batch()
+                    console.print(
+                        f"\n[yellow]Output validation failed{cause_msg}. "
+                        f"Retrying batch "
+                        f"({batch_retries}/{BATCH_MAX_RETRIES})...[/]"
+                    )
+                    continue
+                console.print(
+                    f"\n[red]Output validation failed after "
+                    f"{BATCH_MAX_RETRIES} retries{cause_msg}. "
+                    f"Skipping {len(batch_units)} unit(s).[/]"
+                )
+                saved_indices.update(r.index for r in batch_reports)
+                batch_streamed.clear()
+                next_start += len(batch_units)
+                batch_retries = 0
+                return
+
+    with progress if owns_progress else nullcontext():
+        while next_start < review_count:
+            await _flush_batch()
 
     if owns_progress:
         progress.stop()
