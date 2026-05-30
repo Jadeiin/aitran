@@ -247,6 +247,8 @@ async def _run_streaming(
                         async for content in handle_stream.stream_output(
                             debounce_by=None,
                         ):
+                            if isinstance(content, DeferredToolRequests):
+                                continue
                             live.update(Markdown(str(content)))
 
         assert agent_run.result is not None

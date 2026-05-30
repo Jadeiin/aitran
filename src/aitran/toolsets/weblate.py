@@ -63,10 +63,11 @@ async def list_objects(  # noqa: RUF029, D417
             return "No objects found."
         summary = []
         for item in items:
-            if isinstance(item, dict):
-                # wlc SDK objects are dict subclasses — dict() extracts
-                # the API data without internal Python attributes.
-                entry = {k: v for k, v in dict(item).items() if not k.startswith("_")}
+            if hasattr(item, "get_data"):
+                data = item.get_data()
+                entry = {k: v for k, v in data.items() if not k.startswith("_")}
+            elif isinstance(item, dict):
+                entry = {k: v for k, v in item.items() if not k.startswith("_")}
             else:
                 entry = {"value": str(item)}
             summary.append(entry)
@@ -98,14 +99,20 @@ async def get_stats(  # noqa: RUF029, D417
         # so json.dumps can serialize the API data.
         if isinstance(stats, list):
             cleaned = [
-                {k: v for k, v in dict(s).items() if not k.startswith("_")}
+                {k: v for k, v in s.get_data().items() if not k.startswith("_")}
+                if hasattr(s, "get_data")
+                else {k: v for k, v in s.items() if not k.startswith("_")}
                 if isinstance(s, dict)
                 else str(s)
                 for s in stats
             ]
             return json.dumps(cleaned, ensure_ascii=False, indent=2, default=str)
+        if hasattr(stats, "get_data"):
+            data = stats.get_data()
+            cleaned = {k: v for k, v in data.items() if not k.startswith("_")}
+            return json.dumps(cleaned, ensure_ascii=False, indent=2, default=str)
         if isinstance(stats, dict):
-            cleaned = {k: v for k, v in dict(stats).items() if not k.startswith("_")}
+            cleaned = {k: v for k, v in stats.items() if not k.startswith("_")}
             return json.dumps(cleaned, ensure_ascii=False, indent=2, default=str)
         return str(stats)
     except Exception as e:  # noqa: BLE001
