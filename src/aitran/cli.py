@@ -1057,3 +1057,146 @@ def userdict(explore: bool, lang: str | None) -> None:
         if not lang:
             copy_file_if_not_exists(dict_file, default_dict)
         open_file_by_default(dict_file)
+
+
+@app.command("flow", context_settings=CONTEXT_SETTINGS)
+@click.argument("prompt")
+@click.option(
+    "-m",
+    "--model",
+    "orchestrator_model",
+    envvar="AITRAN_FLOW_MODEL",
+    help=(
+        "Model for the orchestrator agent (provider:model format). "
+        "Defaults to anthropic:claude-sonnet-4-6."
+    ),
+)
+@click.option(
+    "-k",
+    "--key",
+    "orchestrator_key",
+    envvar="AITRAN_FLOW_KEY",
+    help="API key for the orchestrator model",
+)
+@click.option(
+    "--crowdin-token",
+    envvar="AITRAN_CROWDIN_TOKEN",
+    help="Crowdin API token",
+)
+@click.option(
+    "--crowdin-org",
+    envvar="AITRAN_CROWDIN_ORG",
+    help="Crowdin organization (Enterprise only)",
+)
+@click.option(
+    "--crowdin-url",
+    envvar="AITRAN_CROWDIN_BASE_URL",
+    help="Crowdin API base URL override",
+)
+@click.option(
+    "--weblate-url",
+    envvar="AITRAN_WEBLATE_URL",
+    help="Weblate base URL",
+)
+@click.option(
+    "--weblate-token",
+    envvar="AITRAN_WEBLATE_TOKEN",
+    help="Weblate API token",
+)
+@click.option(
+    "--translate-model",
+    envvar="AITRAN_MODEL",
+    default="deepseek:deepseek-v4-flash",
+    show_default=True,
+    help="Model for translation/review tasks",
+)
+@click.option(
+    "--translate-key",
+    envvar="AITRAN_API_KEY",
+    help="API key for the translation model",
+)
+@click.option(
+    "--translate-host",
+    envvar="AITRAN_API_HOST",
+    help="Custom API base URL for the translation model",
+)
+@click.option(
+    "--session-id",
+    help="Session ID to resume or name a new session",
+)
+@click.option(
+    "--resume",
+    is_flag=True,
+    help="Resume from a saved session",
+)
+@_observability_options
+def flow(
+    prompt: str,
+    orchestrator_model: str | None,
+    orchestrator_key: str | None,
+    crowdin_token: str | None,
+    crowdin_org: str | None,
+    crowdin_url: str | None,
+    weblate_url: str | None,
+    weblate_token: str | None,
+    translate_model: str,
+    translate_key: str | None,
+    translate_host: str | None,
+    session_id: str | None,
+    resume: bool,
+    logfire: bool,
+    logfire_capture_http: bool,
+    mlflow: bool,
+    mlflow_tracking_uri: str | None,
+    mlflow_experiment: str | None,
+) -> None:
+    r"""Run an AI-orchestrated translation workflow.
+
+    Give a natural-language prompt describing what you want to translate,
+    and the orchestrator agent will plan and execute the full workflow
+    (download → translate → review → upload) with your approval at each step.
+
+    \b
+    Examples:
+      aitran flow "translate Crowdin project 'my-app' to Chinese"
+      aitran flow "translate all Weblate components in my-project to Japanese"
+      aitran flow --resume --session-id abc123
+    """
+    import asyncio
+
+    from rich.console import Console
+
+    from aitran.flow import run_flow
+    from aitran.toolsets._base import OrchestratorDeps
+
+    console = Console()
+
+    with _observability(
+        logfire=logfire,
+        logfire_capture_http=logfire_capture_http,
+        mlflow=mlflow,
+        mlflow_tracking_uri=mlflow_tracking_uri,
+        mlflow_experiment=mlflow_experiment,
+    ):
+        deps = OrchestratorDeps(
+            crowdin_token=crowdin_token,
+            crowdin_organization=crowdin_org,
+            crowdin_base_url=crowdin_url,
+            weblate_url=weblate_url,
+            weblate_token=weblate_token,
+            translate_model=translate_model,
+            translate_api_key=translate_key,
+            translate_api_host=translate_host,
+        )
+
+        asyncio.run(
+            run_flow(
+                prompt,
+                orchestrator_model=orchestrator_model,
+                orchestrator_api_key=orchestrator_key,
+                deps=deps,
+                session_id=session_id,
+                resume=resume,
+                console=console,
+            )
+        )

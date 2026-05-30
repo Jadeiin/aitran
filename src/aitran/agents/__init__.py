@@ -2,6 +2,9 @@
 
 Each agent lives in its own module. Shared utilities (model routing and prompt
 field helpers) live in ``_base``.
+
+Note: orchestrator agent is imported lazily (not re-exported here) to avoid
+circular imports with the toolsets module.
 """
 
 from aitran.agents._base import (
