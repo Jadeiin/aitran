@@ -104,6 +104,19 @@ def _build_progress(console: Console | None = None) -> Progress:
     return progress
 
 
+def _emit_status(
+    message: str,
+    *,
+    progress: Progress | None = None,
+    stderr: bool = False,
+) -> None:
+    """Emit a status message via progress console when available."""
+    if progress is not None:
+        progress.console.print(message)
+        return
+    print(message, file=sys.stderr if stderr else sys.stdout)
+
+
 class PoTranslator:
     """Handles PO file parsing, filtering, and output."""
 
@@ -707,15 +720,16 @@ def translate_po(
         if inferred_lang:
             target_lang = inferred_lang
     if not target_lang:
-        print(
+        _emit_status(
             "No target language specified via --lang or PO header",
-            file=sys.stderr,
+            progress=progress,
+            stderr=True,
         )
         return
 
     untranslated = translator.get_untranslated(po_file)
     if not untranslated:
-        print("All entries already translated.")
+        _emit_status("All entries already translated.", progress=progress)
         translator.save(po_file, output_path)
         return
 
@@ -767,6 +781,7 @@ def translate_po_dir(
     api_key: str | None = None,
     api_host: str | None = None,
     temperature: float = 0.1,
+    progress: Progress | None = None,
     order: str = "file",
     profile: str = "full",
 ) -> None:
@@ -777,12 +792,15 @@ def translate_po_dir(
         if entry.endswith(".po")
     ]
     if not po_paths:
-        print("No .po files found.")
+        _emit_status("No .po files found.", progress=progress)
         return
 
     max_workers = min(jobs, len(po_paths))
-    progress = _build_progress()
-    with progress, ThreadPoolExecutor(max_workers=max_workers) as executor:
+    owns_progress = progress is None
+    progress = progress or _build_progress()
+    with (
+        progress if owns_progress else nullcontext()
+    ), ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
                 translate_po,
@@ -829,7 +847,7 @@ def translate_xliff_file(
     xlf = translator.parse(xliff_path)
 
     if not xlf.units:
-        print("No translation units found.")
+        _emit_status("No translation units found.", progress=progress)
         return
 
     src = source_lang or xlf.sourcelanguage or "en"
@@ -837,8 +855,10 @@ def translate_xliff_file(
     if not tgt:
         tgt = xlf.targetlanguage
     if not tgt:
-        print(
-            "No target language specified via --lang or XLIFF header", file=sys.stderr
+        _emit_status(
+            "No target language specified via --lang or XLIFF header",
+            progress=progress,
+            stderr=True,
         )
         return
 
@@ -850,7 +870,10 @@ def translate_xliff_file(
 
     untranslated = translator.get_untranslated(xlf)
     if not untranslated:
-        print("All translation units are already translated.")
+        _emit_status(
+            "All translation units are already translated.",
+            progress=progress,
+        )
         translator.save(xlf, output_path)
         return
 
@@ -892,6 +915,7 @@ def translate_xliff_dir(
     api_key: str | None = None,
     api_host: str | None = None,
     temperature: float = 0.1,
+    progress: Progress | None = None,
     profile: str = "full",
     order: str = "file",
 ) -> None:
@@ -902,12 +926,15 @@ def translate_xliff_dir(
         if entry.endswith((".xliff", ".xlf"))
     ]
     if not xliff_paths:
-        print("No .xliff/.xlf files found.")
+        _emit_status("No .xliff/.xlf files found.", progress=progress)
         return
 
     max_workers = min(jobs, len(xliff_paths))
-    progress = _build_progress()
-    with progress, ThreadPoolExecutor(max_workers=max_workers) as executor:
+    owns_progress = progress is None
+    progress = progress or _build_progress()
+    with (
+        progress if owns_progress else nullcontext()
+    ), ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
                 translate_xliff_file,

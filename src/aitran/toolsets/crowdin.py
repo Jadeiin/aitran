@@ -26,6 +26,7 @@ from aitran.crowdin import (
 from aitran.toolsets._base import (
     OrchestratorDeps,
     error_message,
+    report_tool_outcome,
     summarize_list,
     summarize_progress,
 )
@@ -50,6 +51,13 @@ def _project_kwargs(project: str) -> dict:
     return {"project_id": None, "project": project}
 
 
+def _report(
+    ctx: RunContext[OrchestratorDeps], tool_name: str, message: str, ok: bool
+) -> str:
+    report_tool_outcome(ctx.deps, tool_name=tool_name, message=message, ok=ok)
+    return message
+
+
 @crowdin_toolset.tool
 async def list_projects(  # noqa: RUF029
     ctx: RunContext[OrchestratorDeps],
@@ -68,9 +76,19 @@ async def list_projects(  # noqa: RUF029
             base_url=ctx.deps.crowdin_base_url,
             timeout_seconds=ctx.deps.crowdin_timeout,
         )
-        return summarize_list(items, label="projects")
+        return _report(
+            ctx,
+            "crowdin_list_projects",
+            summarize_list(items, label="projects"),
+            True,
+        )
     except Exception as e:  # noqa: BLE001
-        return error_message("List Crowdin projects", e)
+        return _report(
+            ctx,
+            "crowdin_list_projects",
+            error_message("List Crowdin projects", e),
+            False,
+        )
 
 
 @crowdin_toolset.tool
@@ -95,9 +113,19 @@ async def list_files(  # noqa: RUF029, D417
             timeout_seconds=ctx.deps.crowdin_timeout,
             **kwargs,
         )
-        return summarize_list(items, label="files", name_field="path")
+        return _report(
+            ctx,
+            "crowdin_list_files",
+            summarize_list(items, label="files", name_field="path"),
+            True,
+        )
     except Exception as e:  # noqa: BLE001
-        return error_message("List Crowdin files", e)
+        return _report(
+            ctx,
+            "crowdin_list_files",
+            error_message("List Crowdin files", e),
+            False,
+        )
 
 
 @crowdin_toolset.tool
@@ -122,9 +150,19 @@ async def list_languages(  # noqa: RUF029, D417
             timeout_seconds=ctx.deps.crowdin_timeout,
             **kwargs,
         )
-        return summarize_list(items, label="languages", name_field="name")
+        return _report(
+            ctx,
+            "crowdin_list_languages",
+            summarize_list(items, label="languages", name_field="name"),
+            True,
+        )
     except Exception as e:  # noqa: BLE001
-        return error_message("List Crowdin languages", e)
+        return _report(
+            ctx,
+            "crowdin_list_languages",
+            error_message("List Crowdin languages", e),
+            False,
+        )
 
 
 @crowdin_toolset.tool
@@ -153,9 +191,19 @@ async def get_progress(  # noqa: RUF029, D417
             language=language,
             **kwargs,
         )
-        return summarize_progress(items)
+        return _report(
+            ctx,
+            "crowdin_get_progress",
+            summarize_progress(items),
+            True,
+        )
     except Exception as e:  # noqa: BLE001
-        return error_message("Get Crowdin progress", e)
+        return _report(
+            ctx,
+            "crowdin_get_progress",
+            error_message("Get Crowdin progress", e),
+            False,
+        )
 
 
 @crowdin_toolset.tool(requires_approval=True)
@@ -189,9 +237,23 @@ async def download_translation(  # noqa: RUF029, D417
             output_path=output_path,
             **kwargs,
         )
-        return f"Downloaded to {output_path}"
+        message = f"Downloaded to {output_path}"
+        report_tool_outcome(
+            ctx.deps,
+            tool_name="crowdin_download_translation",
+            message=message,
+            ok=True,
+        )
+        return message
     except Exception as e:  # noqa: BLE001
-        return error_message("Crowdin download", e)
+        message = error_message("Crowdin download", e)
+        report_tool_outcome(
+            ctx.deps,
+            tool_name="crowdin_download_translation",
+            message=message,
+            ok=False,
+        )
+        return message
 
 
 @crowdin_toolset.tool(requires_approval=True)
@@ -225,6 +287,20 @@ async def upload_translation(  # noqa: RUF029, D417
             file_path=file_path,
             **kwargs,
         )
-        return f"Uploaded {file_path} to Crowdin"
+        message = f"Uploaded {file_path} to Crowdin"
+        report_tool_outcome(
+            ctx.deps,
+            tool_name="crowdin_upload_translation",
+            message=message,
+            ok=True,
+        )
+        return message
     except Exception as e:  # noqa: BLE001
-        return error_message("Crowdin upload", e)
+        message = error_message("Crowdin upload", e)
+        report_tool_outcome(
+            ctx.deps,
+            tool_name="crowdin_upload_translation",
+            message=message,
+            ok=False,
+        )
+        return message

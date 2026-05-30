@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import uuid
 from collections.abc import Callable
 from contextlib import ExitStack
@@ -26,12 +27,208 @@ from aitran.toolsets._base import OrchestratorDeps
 
 if TYPE_CHECKING:
     from pydantic_ai.messages import ModelMessage
-    from rich.console import Console
+    from rich.console import Console, RenderableType
+    from rich.live import Live
 
 
 # Type for the approval callback.  Receives tool name and args, returns
 # True to approve, False to deny, or a denial reason string.
 ApprovalCallback = Callable[[str, dict], bool | str]
+SlashCommandResult = str
+FLOW_PROMPT = "[bold cyan]aitran flow> [/]"
+APPROVE_PROMPT = "[bold yellow]Approve? [Y/n] [/]"
+REASON_PROMPT = "[bold yellow]Reason (optional): [/]"
+
+_SLASH_COMMAND_HELP = {
+    "/help": "Show available REPL commands.",
+    "/approve on": "Enable automatic approval for approval-gated tools.",
+    "/approve off": "Disable automatic approval.",
+    "/approve status": "Show whether automatic approval is enabled.",
+    "/exit": "Exit the flow REPL.",
+    "/quit": "Exit the flow REPL.",
+}
+
+
+@dataclass
+class _InteractiveTerminal:
+    """Coordinate terminal prompts with Rich live rendering."""
+
+    console: Console
+    auto_approve: bool = False
+    current_live: Live | None = None
+    current_output: str = ""
+    persisted_output: str = ""
+    _live_paused_for_prompt: bool = False
+
+    def begin_turn(self) -> None:
+        """Reset per-turn render state before a new agent response streams."""
+        self.current_output = ""
+        self.persisted_output = ""
+        self._live_paused_for_prompt = False
+
+    def approval(self, tool_name: str, args: dict) -> bool | str:
+        """Prompt for tool approval without fighting live terminal rendering.
+
+        Returns:
+            True to approve, False or a denial reason to reject.
+        """
+        if self.auto_approve:
+            self.report_tool_result(tool_name, "Auto-approved.", True)
+            return True
+        paused_here = self._pause_live_output()
+        try:
+            args_str = json.dumps(args, ensure_ascii=False, indent=2)
+            self.console.print(f"\n[bold yellow]Approve:[/] [cyan]{tool_name}[/]")
+            self.console.print(f"  {args_str}")
+            answer = self.prompt(APPROVE_PROMPT) or ""
+            if answer.strip().lower() in ("n", "no"):
+                reason = self.prompt(REASON_PROMPT)
+                if reason is None:
+                    return False
+                return reason.strip() or False
+            return True
+        finally:
+            if paused_here:
+                self._resume_live_output()
+
+    def report_tool_result(self, tool_name: str, message: str, ok: bool) -> None:
+        """Print an immediate status line for a completed approved tool."""
+        paused_here = self._pause_live_output()
+        try:
+            status = "ok" if ok else "failed"
+            style = "green" if ok else "red"
+            self.console.print(
+                f"[bold {style}]Tool {status}:[/] [cyan]{tool_name}[/] {message}"
+            )
+        finally:
+            if paused_here:
+                self._resume_live_output()
+
+    def follow_up(self, session_id: str) -> str | None:
+        """Prompt for the next conversational turn.
+
+        Returns:
+            The user's reply, or None when the session should end.
+        """
+        self.console.print(
+            "\n[dim]"
+            f"Session {session_id}. Reply to continue, or press Enter to exit. "
+            "Use /help to list REPL commands."
+            "[/dim]"
+        )
+        return self.prompt(FLOW_PROMPT)
+
+    def handle_slash_command(self, text: str) -> SlashCommandResult:
+        """Handle REPL slash commands.
+
+        Returns:
+            ``"handled"`` when consumed locally, ``"exit"`` when the REPL
+            should terminate, or ``"unhandled"`` otherwise.
+        """
+        command = text.strip()
+        if not command.startswith("/"):
+            return "unhandled"
+
+        if command in {"/exit", "/quit"}:
+            self.console.print("[dim]Exiting flow.[/dim]")
+            return "exit"
+        if command == "/help":
+            self.console.print("[dim]Available REPL commands:[/dim]")
+            for name, description in _SLASH_COMMAND_HELP.items():
+                self.console.print(f"  [cyan]{name}[/] — {description}")
+            return "handled"
+        if not command.startswith("/approve"):
+            self.console.print(
+                f"[yellow]Unknown command:[/] {command}\n"
+                "[dim]Use /help to list REPL commands.[/dim]"
+            )
+            return "handled"
+
+        parts = command.split()
+        action = parts[1].lower() if len(parts) > 1 else "toggle"
+        if action == "on":
+            self.auto_approve = True
+        elif action == "off":
+            self.auto_approve = False
+        elif action == "toggle":
+            self.auto_approve = not self.auto_approve
+        elif action != "status":
+            self.console.print(
+                "[yellow]Usage:[/] /approve on | /approve off | /approve status"
+            )
+            return "handled"
+
+        status = "on" if self.auto_approve else "off"
+        self.console.print(f"[dim]Auto-approve is {status}.[/dim]")
+        return "handled"
+
+    def prompt(self, prompt_text: str) -> str | None:
+        """Read a line from the user, pausing live rendering if needed.
+
+        Returns:
+            The stripped user input, or None when the prompt is cancelled.
+        """
+        was_paused_here = self._pause_live_output()
+        try:
+            reply = self.console.input(prompt_text).strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        finally:
+            if was_paused_here:
+                self._resume_live_output()
+        return reply or None
+
+    def update_output(self, content: str) -> RenderableType:
+        """Store the latest streamed output and return only the unpersisted suffix.
+
+        Returns:
+            Renderable content representing the portion not yet printed permanently.
+        """
+        from rich.markdown import Markdown
+        from rich.text import Text
+
+        self.current_output = content
+        suffix = self._suffix_after_persisted(content)
+        if not suffix:
+            return Text("")
+        return Markdown(suffix)
+
+    def persist_live_output(self) -> None:
+        """Permanently print the current streamed output if it has new content."""
+        from rich.markdown import Markdown
+
+        suffix = self._suffix_after_persisted(self.current_output)
+        if suffix:
+            self.console.print(Markdown(suffix))
+            self.persisted_output = self.current_output
+
+    def _suffix_after_persisted(self, content: str) -> str:
+        """Return the portion of *content* not yet written permanently."""
+        if self.persisted_output and content.startswith(self.persisted_output):
+            return content[len(self.persisted_output) :]
+        return content
+
+    def _pause_live_output(self) -> bool:
+        """Pause live rendering and persist visible output if needed.
+
+        Returns:
+            True when this call paused the live display and should resume it later.
+        """
+        live = self.current_live
+        if self._live_paused_for_prompt or not live or not live.is_started:
+            return False
+        live.stop()
+        self.persist_live_output()
+        self._live_paused_for_prompt = True
+        return True
+
+    def _resume_live_output(self) -> None:
+        """Resume live rendering after a prompt-driven pause."""
+        live = self.current_live
+        if not self._live_paused_for_prompt or not live:
+            return
+        live.start(refresh=True)
+        self._live_paused_for_prompt = False
 
 
 @dataclass
@@ -125,7 +322,7 @@ def _build_deferred_handler(
         approvals: dict[str, bool | ToolApproved | ToolDenied] = {}
 
         for call in requests.approvals:
-            args = call.args if isinstance(call.args, dict) else {}
+            args = call.args_as_dict()
             result = on_approval(call.tool_name, args)
             if result is True:
                 approvals[call.tool_call_id] = ToolApproved()
@@ -145,25 +342,27 @@ def _build_deferred_handler(
 
 
 async def run_flow(
-    prompt: str,
+    prompt: str | None,
     *,
     orchestrator_model: str | None = None,
     orchestrator_api_key: str | None = None,
     deps: OrchestratorDeps | None = None,
     session_id: str | None = None,
     resume: bool = False,
+    auto_approve: bool = False,
     on_approval: ApprovalCallback | None = None,
     console: Console | None = None,
 ) -> str:
     """Run the orchestrator flow with deferred-tool approval.
 
     Args:
-        prompt: User's natural-language request.
+        prompt: Optional initial natural-language request.
         orchestrator_model: Model spec for the orchestrator agent.
         orchestrator_api_key: API key for the orchestrator model.
         deps: Orchestrator dependencies (credentials, config).
         session_id: Session ID to resume.
         resume: Whether to resume from a saved session.
+        auto_approve: Whether approvals should be granted automatically.
         on_approval: Callback for tool approval decisions.
             Defaults to CLI stdin prompt.
         console: Rich Console for streaming text output.
@@ -173,7 +372,16 @@ async def run_flow(
         Final text output from the orchestrator.
     """
     deps = deps or OrchestratorDeps()
-    on_approval = on_approval or _cli_approval
+    terminal = (
+        _InteractiveTerminal(console, auto_approve=auto_approve)
+        if console is not None and sys.stdin.isatty()
+        else None
+    )
+    on_approval = on_approval or (
+        terminal.approval if terminal is not None else _cli_approval
+    )
+    if terminal is not None:
+        deps.tool_reporter = terminal.report_tool_result
 
     model = build_orchestrator_model(
         orchestrator_model,
@@ -194,21 +402,62 @@ async def run_flow(
 
     sid = session_id or uuid.uuid4().hex[:12]
 
-    if console is not None:
-        all_msgs = await _run_streaming(agent, prompt, messages, deps, console)
-    else:
-        result = await agent.run(prompt, deps=deps, message_history=messages)
-        all_msgs = result.all_messages()
+    interactive = terminal is not None
+    next_prompt = prompt.strip() if prompt is not None else None
+    final_output = ""
 
-    # Persist final state
-    session = Session(
-        session_id=sid,
-        messages=all_msgs,
-        path=deps.session_dir / f"{sid}.json",
-    )
-    save_session(session, base=deps.session_dir)
+    if next_prompt is None and not interactive:
+        return final_output
 
-    return _extract_output(all_msgs)
+    while True:
+        if next_prompt is None:
+            assert terminal is not None
+            next_prompt = terminal.prompt(FLOW_PROMPT)
+            if next_prompt is None:
+                return final_output
+        command_result = (
+            terminal.handle_slash_command(next_prompt)
+            if terminal is not None
+            else "unhandled"
+        )
+        if command_result == "exit":
+            return final_output
+        if command_result == "handled":
+            next_prompt = None
+            continue
+
+        if console is not None:
+            all_msgs = await _run_streaming(
+                agent,
+                next_prompt,
+                messages,
+                deps,
+                console,
+                terminal=terminal,
+            )
+        else:
+            result = await agent.run(next_prompt, deps=deps, message_history=messages)
+            all_msgs = result.all_messages()
+
+        messages = all_msgs
+        final_output = _extract_output(all_msgs)
+
+        # Persist after every turn so `--resume` can continue from the latest reply.
+        session = Session(
+            session_id=sid,
+            messages=all_msgs,
+            path=deps.session_dir / f"{sid}.json",
+        )
+        save_session(session, base=deps.session_dir)
+
+        if not interactive:
+            return final_output
+
+        assert terminal is not None
+        follow_up = terminal.follow_up(sid)
+        if follow_up is None:
+            return final_output
+        next_prompt = follow_up
 
 
 async def _run_streaming(
@@ -217,6 +466,8 @@ async def _run_streaming(
     messages: list[ModelMessage],
     deps: OrchestratorDeps,
     console: Console,
+    *,
+    terminal: _InteractiveTerminal | None = None,
 ) -> list[ModelMessage]:
     """Run the agent with live-streamed text output.
 
@@ -229,29 +480,53 @@ async def _run_streaming(
     from rich.live import Live
     from rich.markdown import Markdown
     from rich.status import Status
+    from rich.text import Text
 
     status = Status("[dim]Working…[/dim]", console=console)
     with status, ExitStack() as stack:
         async with agent.iter(prompt, deps=deps, message_history=messages) as agent_run:
+            if terminal is not None:
+                terminal.begin_turn()
             live = Live(
-                "",
+                Text(""),
                 refresh_per_second=15,
                 console=console,
+                transient=True,
                 vertical_overflow="ellipsis",
             )
-            async for node in agent_run:
-                if Agent.is_model_request_node(node):
-                    async with node.stream(agent_run.ctx) as handle_stream:
-                        status.stop()
-                        stack.enter_context(live)
-                        async for content in handle_stream.stream_output(
-                            debounce_by=None,
-                        ):
-                            if isinstance(content, DeferredToolRequests):
-                                continue
-                            live.update(Markdown(str(content)))
+            final_renderable = Text("")
+            saw_output = False
+            try:
+                if terminal is not None:
+                    terminal.current_live = live
+                async for node in agent_run:
+                    if Agent.is_model_request_node(node):
+                        async with node.stream(agent_run.ctx) as handle_stream:
+                            status.stop()
+                            stack.enter_context(live)
+                            async for content in handle_stream.stream_output(
+                                debounce_by=None,
+                            ):
+                                if isinstance(content, DeferredToolRequests):
+                                    continue
+                                content_text = str(content)
+                                final_renderable = (
+                                    terminal.update_output(content_text)
+                                    if terminal is not None
+                                    else Markdown(content_text)
+                                )
+                                saw_output = True
+                                live.update(final_renderable)
+            finally:
+                if terminal is not None:
+                    terminal.current_live = None
 
         assert agent_run.result is not None
+        if saw_output:
+            if terminal is not None:
+                terminal.persist_live_output()
+            else:
+                console.print(final_renderable)
         return agent_run.result.all_messages()
 
 

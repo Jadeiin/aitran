@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 from pydantic_ai import RunContext  # noqa: TC002
 from pydantic_ai.toolsets import FunctionToolset
@@ -14,6 +15,7 @@ from aitran.review import review_file
 from aitran.toolsets._base import (
     OrchestratorDeps,
     error_message,
+    report_tool_outcome,
 )
 from aitran.translate import (
     translate_po,
@@ -23,6 +25,30 @@ from aitran.translate import (
 )
 
 translate_toolset: FunctionToolset[OrchestratorDeps] = FunctionToolset()
+
+
+def _noop_print(*_args, **_kwargs) -> None:
+    return None
+
+
+class _SilentProgress:
+    """Minimal progress stub for orchestrator tool runs.
+
+    The flow command already renders model output with Rich Live. Nested
+    translation/review progress bars cause terminal redraw conflicts, so the
+    orchestrator uses this no-op progress object instead.
+    """
+
+    console = SimpleNamespace(print=_noop_print)
+
+    def add_task(self, *_args, **_kwargs) -> int:
+        return 1
+
+    def update(self, *_args, **_kwargs) -> None:
+        return None
+
+
+_SILENT_PROGRESS = _SilentProgress()
 
 
 def _translate_kwargs(deps: OrchestratorDeps) -> dict:
@@ -97,9 +123,14 @@ async def translate_file(  # noqa: D417
                 output_path=output,
                 context_file=None,
                 batch_size=100,
+                progress=_SILENT_PROGRESS,
                 **kwargs,
             )
-            return f"Translated PO file: {path}"
+            message = f"Translated PO file: {path}"
+            report_tool_outcome(
+                ctx.deps, tool_name="translate_file", message=message, ok=True
+            )
+            return message
 
         if fmt == "xliff":
             await asyncio.to_thread(
@@ -112,9 +143,14 @@ async def translate_file(  # noqa: D417
                 output_path=path,
                 context_file=None,
                 batch_size=100,
+                progress=_SILENT_PROGRESS,
                 **kwargs,
             )
-            return f"Translated XLIFF file: {path}"
+            message = f"Translated XLIFF file: {path}"
+            report_tool_outcome(
+                ctx.deps, tool_name="translate_file", message=message, ok=True
+            )
+            return message
 
         # Directory
         po_files = [f for f in os.listdir(path) if f.endswith(".po")]
@@ -129,6 +165,7 @@ async def translate_file(  # noqa: D417
                 verbose=False,
                 context_file=None,
                 batch_size=100,
+                progress=_SILENT_PROGRESS,
                 **kwargs,
             )
         if xliff_files:
@@ -141,13 +178,22 @@ async def translate_file(  # noqa: D417
                 verbose=False,
                 context_file=None,
                 batch_size=100,
+                progress=_SILENT_PROGRESS,
                 **kwargs,
             )
         total = len(po_files) + len(xliff_files)
-        return f"Translated {total} file(s) in {path}"
+        message = f"Translated {total} file(s) in {path}"
+        report_tool_outcome(
+            ctx.deps, tool_name="translate_file", message=message, ok=True
+        )
+        return message
 
     except Exception as e:  # noqa: BLE001
-        return error_message("Translate", e)
+        message = error_message("Translate", e)
+        report_tool_outcome(
+            ctx.deps, tool_name="translate_file", message=message, ok=False
+        )
+        return message
 
 
 @translate_toolset.tool(requires_approval=True)
@@ -185,8 +231,17 @@ async def review_translated_file(  # noqa: D417
             output_path=path,
             batch_size=100,
             auto_fix=auto_fix,
+            progress=_SILENT_PROGRESS,
             **kwargs,
         )
-        return json.dumps(summary, indent=2)
+        message = json.dumps(summary, indent=2)
+        report_tool_outcome(
+            ctx.deps, tool_name="review_translated_file", message=message, ok=True
+        )
+        return message
     except Exception as e:  # noqa: BLE001
-        return error_message("Review", e)
+        message = error_message("Review", e)
+        report_tool_outcome(
+            ctx.deps, tool_name="review_translated_file", message=message, ok=False
+        )
+        return message

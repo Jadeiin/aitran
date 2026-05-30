@@ -1060,7 +1060,7 @@ def userdict(explore: bool, lang: str | None) -> None:
 
 
 @app.command("flow", context_settings=CONTEXT_SETTINGS)
-@click.argument("prompt")
+@click.argument("prompt", required=False)
 @click.option(
     "-m",
     "--model",
@@ -1129,9 +1129,15 @@ def userdict(explore: bool, lang: str | None) -> None:
     is_flag=True,
     help="Resume from a saved session",
 )
+@click.option(
+    "--auto-approve",
+    is_flag=True,
+    envvar="AITRAN_FLOW_AUTO_APPROVE",
+    help="Automatically approve tools that require confirmation.",
+)
 @_observability_options
 def flow(
-    prompt: str,
+    prompt: str | None,
     orchestrator_model: str | None,
     orchestrator_key: str | None,
     crowdin_token: str | None,
@@ -1144,23 +1150,18 @@ def flow(
     translate_host: str | None,
     session_id: str | None,
     resume: bool,
+    auto_approve: bool,
     logfire: bool,
     logfire_capture_http: bool,
     mlflow: bool,
     mlflow_tracking_uri: str | None,
     mlflow_experiment: str | None,
 ) -> None:
-    r"""Run an AI-orchestrated translation workflow.
+    """Run an AI-orchestrated translation workflow.
 
-    Give a natural-language prompt describing what you want to translate,
-    and the orchestrator agent will plan and execute the full workflow
-    (download → translate → review → upload) with your approval at each step.
-
-    \b
-    Examples:
-      aitran flow "translate Crowdin project 'my-app' to Chinese"
-      aitran flow "translate all Weblate components in my-project to Japanese"
-      aitran flow --resume --session-id abc123
+    Give a natural-language request and let the orchestrator inspect,
+    download, translate, review, and upload with approval at each step.
+    If PROMPT is omitted, starts the interactive REPL.
     """
     import asyncio
 
@@ -1197,6 +1198,7 @@ def flow(
                 deps=deps,
                 session_id=session_id,
                 resume=resume,
+                auto_approve=auto_approve,
                 console=console,
             )
         )

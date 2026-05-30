@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
@@ -18,7 +17,7 @@ from aitran.agents import (
 )
 from aitran.agents._base import fmt_base_url
 from aitran.qa import QARunner, UnitQAReport
-from aitran.translate import _build_progress
+from aitran.translate import _build_progress, _emit_status
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent
@@ -193,7 +192,10 @@ async def _run_review_async(
         "skip": 0,
     }
     if not review_units:
-        print(f"Reviewed {total_count} units, all clean.")
+        _emit_status(
+            f"Reviewed {total_count} units, all clean.",
+            progress=progress,
+        )
         translator.save(store, output_path)
         return summary
 
@@ -337,6 +339,7 @@ def review_file(
     api_key: str | None = None,
     api_host: str | None = None,
     temperature: float = 0.1,
+    progress: Progress | None = None,
 ) -> dict[str, int]:
     """Review a single PO or XLIFF file.
 
@@ -357,9 +360,10 @@ def review_file(
             if inferred_lang:
                 target_lang = inferred_lang
         if not target_lang:
-            print(
+            _emit_status(
                 "No target language specified via --lang or PO header",
-                file=sys.stderr,
+                progress=progress,
+                stderr=True,
             )
             return empty
 
@@ -372,9 +376,10 @@ def review_file(
         if not target_lang:
             target_lang = store.targetlanguage or ""
         if not target_lang:
-            print(
+            _emit_status(
                 "No target language specified via --lang or XLIFF header",
-                file=sys.stderr,
+                progress=progress,
+                stderr=True,
             )
             return empty
 
@@ -386,7 +391,7 @@ def review_file(
         ]
 
     if not units:
-        print("No translated entries to review.")
+        _emit_status("No translated entries to review.", progress=progress)
         return empty
 
     return asyncio.run(
@@ -404,5 +409,6 @@ def review_file(
             api_key=api_key,
             api_host=api_host,
             temperature=temperature,
+            progress=progress,
         )
     )

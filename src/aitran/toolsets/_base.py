@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+
+ToolReporter = Callable[[str, str, bool], None]
 
 
 @dataclass
@@ -33,6 +36,9 @@ class OrchestratorDeps:
 
     # Session persistence
     session_dir: Path = field(default_factory=lambda: Path(".aitran/sessions"))
+
+    # Optional terminal reporter for approved tool completion.
+    tool_reporter: ToolReporter | None = None
 
 
 def summarize_list(items: list[dict], *, label: str, name_field: str = "name") -> str:
@@ -95,3 +101,15 @@ def error_message(operation: str, error: Exception) -> str:
         Error summary string.
     """
     return f"{operation} failed: {type(error).__name__}: {error}"
+
+
+def report_tool_outcome(
+    deps: OrchestratorDeps,
+    *,
+    tool_name: str,
+    message: str,
+    ok: bool,
+) -> None:
+    """Emit an immediate tool completion update when a reporter is configured."""
+    if deps.tool_reporter is not None:
+        deps.tool_reporter(tool_name, message, ok)
