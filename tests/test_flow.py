@@ -336,6 +336,136 @@ async def test_deferred_handler_parses_tool_args_from_json():
     assert "call-1" in result.approvals
 
 
+def test_list_sessions_returns_sorted_entries(tmp_path: Path):
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+
+    # Create two session files with different mtimes.
+    old = session_dir / "aaa.json"
+    old.write_bytes(ModelMessagesTypeAdapter.dump_json([]))
+    import time
+
+    time.sleep(0.05)
+    new = session_dir / "bbb.json"
+    new.write_bytes(ModelMessagesTypeAdapter.dump_json([]))
+
+    entries = flow.list_sessions(base=session_dir)
+
+    assert len(entries) == 2
+    assert entries[0][0] == "bbb"  # newest first
+    assert entries[1][0] == "aaa"
+
+
+def test_list_sessions_skips_corrupt_files(tmp_path: Path):
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    (session_dir / "bad.json").write_text("not valid json")
+    (session_dir / "empty.json").write_text("[]")
+
+    entries = flow.list_sessions(base=session_dir)
+
+    # bad.json is skipped; empty.json has 0 messages but is valid.
+    assert len(entries) == 1
+    assert entries[0][0] == "empty"
+
+
+async def test_run_flow_handles_resume_by_id(monkeypatch, tmp_path: Path):
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    calls: list[str] = []
+    outputs = [[_response(DONE_TEXT)]]
+
+    async def fake_run_streaming(
+        agent, prompt, messages, deps, console, *, terminal=None
+    ):
+        del agent, messages, deps, console, terminal
+        await _tick()
+        calls.append(prompt)
+        return outputs.pop(0)
+
+    monkeypatch.setattr(flow, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
+    monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
+    monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(
+        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+    )
+
+    # Pre-create a session file.
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    saved_msgs = [_response(PLAN_TEXT)]
+    (session_dir / "old123.json").write_bytes(
+        ModelMessagesTypeAdapter.dump_json(saved_msgs)
+    )
+
+    console = DummyConsole(["/resume old123", "继续执行", ""])
+    deps = OrchestratorDeps(session_dir=session_dir)
+
+    result = await flow.run_flow(None, deps=deps, console=console)
+
+    assert result == DONE_TEXT
+    assert calls == ["继续执行"]
+    assert any("Resumed session old123" in line for line in console.printed)
+    assert any(PLAN_TEXT in line for line in console.printed)
+
+
+async def test_run_flow_handles_resume_selection(monkeypatch, tmp_path: Path):
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    calls: list[str] = []
+    outputs = [[_response(DONE_TEXT)]]
+
+    async def fake_run_streaming(
+        agent, prompt, messages, deps, console, *, terminal=None
+    ):
+        del agent, messages, deps, console, terminal
+        await _tick()
+        calls.append(prompt)
+        return outputs.pop(0)
+
+    monkeypatch.setattr(flow, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
+    monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
+    monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(
+        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+    )
+
+    # Pre-create a session file.
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    (session_dir / "abc.json").write_bytes(
+        ModelMessagesTypeAdapter.dump_json([_response(PLAN_TEXT)])
+    )
+
+    # /resume lists sessions, user picks "1", then continues.
+    console = DummyConsole(["/resume", "1", "继续执行", ""])
+    deps = OrchestratorDeps(session_dir=session_dir)
+
+    result = await flow.run_flow(None, deps=deps, console=console)
+
+    assert result == DONE_TEXT
+    assert calls == ["继续执行"]
+    assert any("Saved sessions:" in line for line in console.printed)
+    assert any("Resumed session abc" in line for line in console.printed)
+    assert any(PLAN_TEXT in line for line in console.printed)
+
+
+async def test_handle_resume_no_sessions(tmp_path: Path):
+    console = DummyConsole([])
+    terminal = flow._InteractiveTerminal(console=console)
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+
+    result = await terminal.handle_resume("/resume", session_dir)
+
+    assert result is None
+    assert any("No saved sessions" in line for line in console.printed)
+
+
 async def _tick() -> None:
     """Keep fake async hooks visibly asynchronous for linting."""
     await asyncio.sleep(0)

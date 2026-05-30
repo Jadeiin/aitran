@@ -50,6 +50,8 @@ _SLASH_COMMAND_HELP = {
     "/approve on": "Enable automatic approval for approval-gated tools.",
     "/approve off": "Disable automatic approval.",
     "/approve status": "Show whether automatic approval is enabled.",
+    "/resume": "List saved sessions and restore one.",
+    "/resume <id>": "Restore a specific session by ID.",
     "/exit": "Exit the flow REPL.",
     "/quit": "Exit the flow REPL.",
 }
@@ -200,6 +202,81 @@ class _InteractiveTerminal:
         self.console.print(f"[dim]Auto-approve is {status}.[/dim]")
         return "handled"
 
+    async def handle_resume(
+        self,
+        command: str,
+        session_dir: Path,
+    ) -> tuple[list[ModelMessage], str] | None:
+        """Handle ``/resume`` — list sessions and load one.
+
+        Returns:
+            ``(messages, session_id)`` for the selected session, or None if
+            the user cancelled.
+        """
+        from datetime import datetime
+
+        parts = command.split(maxsplit=1)
+        target_id = parts[1].strip() if len(parts) > 1 else None
+
+        if target_id:
+            try:
+                session = load_session(target_id, base=session_dir)
+            except FileNotFoundError:
+                self.console.print(
+                    f"[yellow]Session not found:[/] {target_id}"
+                )
+                return None
+            self.console.print(
+                f"[dim]Resumed session {target_id} "
+                f"({len(session.messages)} messages).[/dim]"
+            )
+            self._replay_messages(session.messages)
+            return session.messages, target_id
+
+        entries = list_sessions(base=session_dir)
+        if not entries:
+            self.console.print("[dim]No saved sessions found.[/dim]")
+            return None
+
+        self.console.print("[dim]Saved sessions:[/dim]")
+        for idx, (sid, mtime, count) in enumerate(entries, 1):
+            ts = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")  # noqa: DTZ006
+            self.console.print(
+                f"  [cyan]{idx}[/]  {sid}  {ts}  ({count} messages)"
+            )
+
+        choice = await self._read_line("Session number: ")
+        if choice is None:
+            return None
+        try:
+            idx = int(choice)
+            sid, _, _ = entries[idx - 1]
+        except (ValueError, IndexError):
+            self.console.print("[yellow]Invalid selection.[/yellow]")
+            return None
+
+        session = load_session(sid, base=session_dir)
+        self.console.print(
+            f"[dim]Resumed session {sid} "
+            f"({len(session.messages)} messages).[/dim]"
+        )
+        self._replay_messages(session.messages)
+        return session.messages, sid
+
+    def _replay_messages(self, messages: list[ModelMessage]) -> None:
+        """Print conversation history to the terminal."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse
+
+        for msg in messages:
+            if isinstance(msg, ModelRequest):
+                for part in msg.parts:
+                    if part.part_kind == "user-prompt":
+                        self.console.print(f"\n[bold cyan]> [/]{part.content}")
+            elif isinstance(msg, ModelResponse):
+                text = msg.text
+                if text:
+                    self.console.print(text)
+
     async def prompt(self, prompt_text: str) -> str | None:
         """Read a line from the user with history and auto-suggest.
 
@@ -346,6 +423,29 @@ def load_session(
     return Session(session_id=session_id, messages=messages, path=path)
 
 
+def list_sessions(
+    *,
+    base: Path | None = None,
+) -> list[tuple[str, float, int]]:
+    """List persisted sessions sorted by modification time (newest first).
+
+    Returns:
+        List of ``(session_id, mtime, message_count)`` tuples.
+    """
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    d = _session_dir(base)
+    results: list[tuple[str, float, int]] = []
+    for path in sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        sid = path.stem
+        try:
+            messages = ModelMessagesTypeAdapter.validate_json(path.read_bytes())
+        except Exception:  # noqa: BLE001, S112
+            continue
+        results.append((sid, path.stat().st_mtime, len(messages)))
+    return results
+
+
 def _cli_approval(tool_name: str, args: dict) -> bool | str:
     """Default CLI approval callback — prompts user on stdin.
 
@@ -486,6 +586,15 @@ async def run_flow(
             next_prompt = await terminal.prompt(FLOW_PROMPT)
             if next_prompt is None:
                 return final_output
+
+        # Handle /resume before sync slash commands (needs async I/O).
+        if terminal is not None and next_prompt.strip().startswith("/resume"):
+            result = await terminal.handle_resume(next_prompt, deps.session_dir)
+            if result is not None:
+                messages, sid = result
+            next_prompt = None
+            continue
+
         command_result = (
             terminal.handle_slash_command(next_prompt)
             if terminal is not None
