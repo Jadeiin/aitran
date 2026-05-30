@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING
 
 from pydantic_ai import DeferredToolRequests
@@ -345,8 +346,6 @@ def test_list_sessions_returns_sorted_entries(tmp_path: Path):
     # Create two session files with different mtimes.
     old = session_dir / "aaa.json"
     old.write_bytes(ModelMessagesTypeAdapter.dump_json([]))
-    import time
-
     time.sleep(0.05)
     new = session_dir / "bbb.json"
     new.write_bytes(ModelMessagesTypeAdapter.dump_json([]))

@@ -20,6 +20,7 @@ from pydantic_ai import (
     RunContext,
     ToolDenied,
 )
+from pydantic_ai.messages import ModelRequest, ModelResponse
 
 from aitran.agents.orchestrator import (
     build_orchestrator_agent,
@@ -120,9 +121,9 @@ class _InteractiveTerminal:
             args_str = json.dumps(args, ensure_ascii=False, indent=2)
             self.console.print(f"\n[bold yellow]Approve:[/] [cyan]{tool_name}[/]")
             self.console.print(f"  {args_str}")
-            answer = await self._read_line(APPROVE_PROMPT) or ""
+            answer = await self._read_line(APPROVE_PROMPT, record_history=False) or ""
             if answer.strip().lower() in ("n", "no"):
-                reason = await self._read_line(REASON_PROMPT)
+                reason = await self._read_line(REASON_PROMPT, record_history=False)
                 if reason is None:
                     return False
                 return reason.strip() or False
@@ -226,12 +227,7 @@ class _InteractiveTerminal:
                     f"[yellow]Session not found:[/] {target_id}"
                 )
                 return None
-            self.console.print(
-                f"[dim]Resumed session {target_id} "
-                f"({len(session.messages)} messages).[/dim]"
-            )
-            self._replay_messages(session.messages)
-            return session.messages, target_id
+            return self._finish_resume(target_id, session)
 
         entries = list_sessions(base=session_dir)
         if not entries:
@@ -256,6 +252,16 @@ class _InteractiveTerminal:
             return None
 
         session = load_session(sid, base=session_dir)
+        return self._finish_resume(sid, session)
+
+    def _finish_resume(
+        self, sid: str, session: Session
+    ) -> tuple[list[ModelMessage], str]:
+        """Print resume confirmation and replay history.
+
+        Returns:
+            Messages and session ID tuple.
+        """
         self.console.print(
             f"[dim]Resumed session {sid} "
             f"({len(session.messages)} messages).[/dim]"
@@ -265,8 +271,6 @@ class _InteractiveTerminal:
 
     def _replay_messages(self, messages: list[ModelMessage]) -> None:
         """Print conversation history to the terminal."""
-        from pydantic_ai.messages import ModelRequest, ModelResponse
-
         for msg in messages:
             if isinstance(msg, ModelRequest):
                 for part in msg.parts:
@@ -435,14 +439,20 @@ def list_sessions(
     from pydantic_ai.messages import ModelMessagesTypeAdapter
 
     d = _session_dir(base)
+    pairs: list[tuple[Path, float]] = []
+    for path in d.glob("*.json"):
+        st = path.stat()
+        pairs.append((path, st.st_mtime))
+    pairs.sort(key=lambda t: t[1], reverse=True)
+
     results: list[tuple[str, float, int]] = []
-    for path in sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for path, mtime in pairs:
         sid = path.stem
         try:
             messages = ModelMessagesTypeAdapter.validate_json(path.read_bytes())
         except Exception:  # noqa: BLE001, S112
             continue
-        results.append((sid, path.stat().st_mtime, len(messages)))
+        results.append((sid, mtime, len(messages)))
     return results
 
 
@@ -588,7 +598,8 @@ async def run_flow(
                 return final_output
 
         # Handle /resume before sync slash commands (needs async I/O).
-        if terminal is not None and next_prompt.strip().startswith("/resume"):
+        cmd = next_prompt.strip()
+        if terminal is not None and (cmd == "/resume" or cmd.startswith("/resume ")):
             result = await terminal.handle_resume(next_prompt, deps.session_dir)
             if result is not None:
                 messages, sid = result
@@ -716,8 +727,6 @@ def _extract_output(messages: list[ModelMessage]) -> str:
     Returns:
         Text content of the last ModelResponse, or empty string.
     """
-    from pydantic_ai.messages import ModelResponse
-
     for msg in reversed(messages):
         if isinstance(msg, ModelResponse):
             text = msg.text
