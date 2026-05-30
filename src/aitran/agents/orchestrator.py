@@ -62,7 +62,7 @@ def build_orchestrator_agent(
     model: Model,
     *,
     deferred_handler: DeferredHandler | None = None,
-) -> Agent[OrchestratorDeps, str]:
+) -> Agent[OrchestratorDeps, str | DeferredToolRequests]:
     """Build the orchestrator agent with all toolsets.
 
     Args:
@@ -87,7 +87,7 @@ def build_orchestrator_agent(
     return Agent(
         model,
         deps_type=OrchestratorDeps,
-        output_type=str,
+        output_type=[str, DeferredToolRequests],
         system_prompt=SYSTEM_PROMPT,
         toolsets=[
             PrefixedToolset(crowdin_toolset, "crowdin_"),

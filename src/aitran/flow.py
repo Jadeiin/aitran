@@ -212,7 +212,7 @@ async def run_flow(
 
 
 async def _run_streaming(
-    agent: Agent[OrchestratorDeps, str],
+    agent: Agent[OrchestratorDeps, str | DeferredToolRequests],
     prompt: str,
     messages: list[ModelMessage],
     deps: OrchestratorDeps,
