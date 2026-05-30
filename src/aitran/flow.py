@@ -84,15 +84,19 @@ class _InteractiveTerminal:
     persisted_output: str = ""
     _live_paused_for_prompt: bool = False
     session: PromptSession[Any] | None = field(default=None, init=False)
+    _ephemeral_session: PromptSession[Any] | None = field(
+        default=None, init=False, repr=False
+    )
 
     def init_prompt_session(self, history_path: Path) -> None:
         """Create the prompt_toolkit session with persistent history."""
         from prompt_toolkit import PromptSession
-        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.history import FileHistory, InMemoryHistory
 
         history_path.parent.mkdir(parents=True, exist_ok=True)
         history_path.touch(exist_ok=True)
         self.session = PromptSession(history=FileHistory(str(history_path)))
+        self._ephemeral_session = PromptSession(history=InMemoryHistory())
 
     def begin_turn(self) -> None:
         """Reset per-turn render state before a new agent response streams."""
@@ -114,9 +118,9 @@ class _InteractiveTerminal:
             args_str = json.dumps(args, ensure_ascii=False, indent=2)
             self.console.print(f"\n[bold yellow]Approve:[/] [cyan]{tool_name}[/]")
             self.console.print(f"  {args_str}")
-            answer = await self.prompt(APPROVE_PROMPT) or ""
+            answer = await self._read_line(APPROVE_PROMPT) or ""
             if answer.strip().lower() in ("n", "no"):
-                reason = await self.prompt(REASON_PROMPT)
+                reason = await self._read_line(REASON_PROMPT)
                 if reason is None:
                     return False
                 return reason.strip() or False
@@ -206,12 +210,26 @@ class _InteractiveTerminal:
         Returns:
             The stripped user input, or None when the prompt is cancelled.
         """
+        return await self._read_line(prompt_text, record_history=True)
+
+    async def _read_line(
+        self, prompt_text: str, *, record_history: bool = True
+    ) -> str | None:
+        """Read a single line, optionally recording to persistent history.
+
+        Returns:
+            The stripped user input, or None when the prompt is cancelled.
+        """
         was_paused_here = self._pause_live_output()
         try:
             if self.session is not None:
-                reply = await self.session.prompt_async(
-                    prompt_text, auto_suggest=_FlowAutoSuggest()
-                )
+                if record_history:
+                    reply = await self.session.prompt_async(
+                        prompt_text, auto_suggest=_FlowAutoSuggest()
+                    )
+                else:
+                    session = self._ephemeral_session or self.session
+                    reply = await session.prompt_async(prompt_text)
             else:
                 reply = self.console.input(prompt_text)
             reply = reply.strip()
