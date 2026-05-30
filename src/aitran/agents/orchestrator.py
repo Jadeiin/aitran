@@ -8,7 +8,7 @@ via pydantic-ai's Deferred Tools mechanism.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, RunContext
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 DeferredHandler = Callable[
     [RunContext[OrchestratorDeps], DeferredToolRequests],
-    DeferredToolResults,
+    DeferredToolResults | Awaitable[DeferredToolResults | None] | None,
 ]
 
 SYSTEM_PROMPT = (

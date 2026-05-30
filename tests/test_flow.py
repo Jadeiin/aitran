@@ -17,7 +17,11 @@ if TYPE_CHECKING:
 
 PLAN_TEXT = "执行计划\n\n是否按此计划执行?"
 DONE_TEXT = "已执行完成。"
-FLOW_PROMPT = "[bold cyan]aitran flow> [/]"
+FLOW_PROMPT = "aitran flow> "
+
+
+def _noop_init_prompt_session(_self: object, *_args: object, **_kwargs: object) -> None:
+    """Stub for init_prompt_session in tests that don't need prompt_toolkit."""
 
 
 class DummyConsole:
@@ -77,6 +81,9 @@ async def test_run_flow_continues_interactively(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
     monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
     monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(
+        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+    )
 
     console = DummyConsole(["继续执行", ""])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
@@ -132,6 +139,9 @@ async def test_run_flow_enters_repl_when_prompt_missing(monkeypatch, tmp_path: P
     monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
     monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
     monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(
+        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+    )
 
     console = DummyConsole(["翻译这个组件", ""])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
@@ -158,6 +168,9 @@ async def test_run_flow_handles_approve_slash_command(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
     monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
     monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(
+        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+    )
 
     console = DummyConsole(["/approve on", "翻译这个组件", ""])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
@@ -184,6 +197,9 @@ async def test_run_flow_handles_exit_slash_command(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
     monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
     monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(
+        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+    )
 
     console = DummyConsole(["/exit"])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
@@ -195,13 +211,13 @@ async def test_run_flow_handles_exit_slash_command(monkeypatch, tmp_path: Path):
     assert "Exiting flow." in console.printed[0]
 
 
-def test_interactive_terminal_pauses_live_while_prompting():
+async def test_interactive_terminal_pauses_live_while_prompting():
     console = DummyConsole(["继续执行"])
     live = DummyLive()
     terminal = flow._InteractiveTerminal(console=console, current_live=live)
     terminal.current_output = "当前模型输出"
 
-    reply = terminal.prompt(FLOW_PROMPT)
+    reply = await terminal.prompt(FLOW_PROMPT)
 
     assert reply == "继续执行"
     assert console.prompts == [FLOW_PROMPT]
@@ -211,26 +227,27 @@ def test_interactive_terminal_pauses_live_while_prompting():
     assert len(console.printed) == 1
 
 
-def test_interactive_terminal_approval_uses_shared_console():
+async def test_interactive_terminal_approval_uses_shared_console():
     console = DummyConsole(["n", "参数不对"])
     terminal = flow._InteractiveTerminal(console=console)
 
-    result = terminal.approval("translate_file", {"path": "demo.po"})
+    result = await terminal.approval("translate_file", {"path": "demo.po"})
 
     assert result == "参数不对"
     assert console.prompts == [
-        "[bold yellow]Approve? [Y/n] [/]",
-        "[bold yellow]Reason (optional): [/]",
+        "Approve? [Y/n] ",
+        "Reason (optional): ",
     ]
 
 
-def test_interactive_terminal_approval_preserves_output_order():
+async def test_interactive_terminal_approval_preserves_output_order():
     console = DummyConsole([""])
     live = DummyLive()
     terminal = flow._InteractiveTerminal(console=console, current_live=live)
     terminal.current_output = "先下载文件:"
 
-    terminal.approval("weblate__download_translation", {"object_path": "demo/path"})
+    args = {"object_path": "demo/path"}
+    await terminal.approval("weblate__download_translation", args)
 
     assert live.events == ["stop", "start:True"]
     assert terminal.persisted_output == "先下载文件:"
@@ -253,11 +270,11 @@ def test_interactive_terminal_reports_completed_tool():
     assert "translate_file" in console.printed[1]
 
 
-def test_interactive_terminal_auto_approves_when_enabled():
+async def test_interactive_terminal_auto_approves_when_enabled():
     console = DummyConsole([])
     terminal = flow._InteractiveTerminal(console=console, auto_approve=True)
 
-    result = terminal.approval("translate_file", {"path": "demo.po"})
+    result = await terminal.approval("translate_file", {"path": "demo.po"})
 
     assert result is True
     assert "Auto-approved." in console.printed[0]
@@ -294,7 +311,7 @@ def test_interactive_terminal_handles_unknown_command():
     assert "Unknown command:" in console.printed[0]
 
 
-def test_deferred_handler_parses_tool_args_from_json():
+async def test_deferred_handler_parses_tool_args_from_json():
     seen: list[dict] = []
 
     def on_approval(tool_name: str, args: dict) -> bool:
@@ -313,7 +330,7 @@ def test_deferred_handler_parses_tool_args_from_json():
         ]
     )
 
-    result = handler(None, requests)
+    result = await handler(None, requests)
 
     assert seen == [{"path": "demo.po", "target_lang": "zh_CN"}]
     assert "call-1" in result.approvals

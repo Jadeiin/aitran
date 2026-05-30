@@ -45,6 +45,7 @@ dependencies = [
     "platformdirs>=4.0",
     "pydantic-ai-slim[anthropic,openai,retries]>=1.0",
     "rich>=13.0",
+    "prompt-toolkit>=3.0",
     "wlc>=2.0.0",
     "crowdin-api-client>=1.26.0",
 ]

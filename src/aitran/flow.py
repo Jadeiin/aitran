@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import sys
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory, Suggestion
 from pydantic_ai import (
     Agent,
     DeferredToolRequests,
@@ -26,6 +28,9 @@ from aitran.agents.orchestrator import (
 from aitran.toolsets._base import OrchestratorDeps
 
 if TYPE_CHECKING:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.buffer import Buffer
+    from prompt_toolkit.document import Document
     from pydantic_ai.messages import ModelMessage
     from rich.console import Console, RenderableType
     from rich.live import Live
@@ -33,11 +38,12 @@ if TYPE_CHECKING:
 
 # Type for the approval callback.  Receives tool name and args, returns
 # True to approve, False to deny, or a denial reason string.
-ApprovalCallback = Callable[[str, dict], bool | str]
+# May be sync or async (prompt_toolkit prompts are async).
+ApprovalCallback = Callable[[str, dict], bool | str | Awaitable[bool | str]]
 SlashCommandResult = str
-FLOW_PROMPT = "[bold cyan]aitran flow> [/]"
-APPROVE_PROMPT = "[bold yellow]Approve? [Y/n] [/]"
-REASON_PROMPT = "[bold yellow]Reason (optional): [/]"
+FLOW_PROMPT = "aitran flow> "
+APPROVE_PROMPT = "Approve? [Y/n] "
+REASON_PROMPT = "Reason (optional): "
 
 _SLASH_COMMAND_HELP = {
     "/help": "Show available REPL commands.",
@@ -47,6 +53,24 @@ _SLASH_COMMAND_HELP = {
     "/exit": "Exit the flow REPL.",
     "/quit": "Exit the flow REPL.",
 }
+
+_SLASH_COMMANDS = list(_SLASH_COMMAND_HELP)
+
+
+class _FlowAutoSuggest(AutoSuggestFromHistory):
+    """Auto-suggest slash commands in addition to history."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._commands = _SLASH_COMMANDS
+
+    def get_suggestion(self, buffer: Buffer, document: Document) -> Suggestion | None:
+        suggestion = super().get_suggestion(buffer, document)
+        text = document.text_before_cursor.strip()
+        for cmd in self._commands:
+            if cmd.startswith(text) and cmd != text:
+                return Suggestion(cmd[len(text) :])
+        return suggestion
 
 
 @dataclass
@@ -59,6 +83,16 @@ class _InteractiveTerminal:
     current_output: str = ""
     persisted_output: str = ""
     _live_paused_for_prompt: bool = False
+    session: PromptSession[Any] | None = field(default=None, init=False)
+
+    def init_prompt_session(self, history_path: Path) -> None:
+        """Create the prompt_toolkit session with persistent history."""
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.history import FileHistory
+
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.touch(exist_ok=True)
+        self.session = PromptSession(history=FileHistory(str(history_path)))
 
     def begin_turn(self) -> None:
         """Reset per-turn render state before a new agent response streams."""
@@ -66,7 +100,7 @@ class _InteractiveTerminal:
         self.persisted_output = ""
         self._live_paused_for_prompt = False
 
-    def approval(self, tool_name: str, args: dict) -> bool | str:
+    async def approval(self, tool_name: str, args: dict) -> bool | str:
         """Prompt for tool approval without fighting live terminal rendering.
 
         Returns:
@@ -80,9 +114,9 @@ class _InteractiveTerminal:
             args_str = json.dumps(args, ensure_ascii=False, indent=2)
             self.console.print(f"\n[bold yellow]Approve:[/] [cyan]{tool_name}[/]")
             self.console.print(f"  {args_str}")
-            answer = self.prompt(APPROVE_PROMPT) or ""
+            answer = await self.prompt(APPROVE_PROMPT) or ""
             if answer.strip().lower() in ("n", "no"):
-                reason = self.prompt(REASON_PROMPT)
+                reason = await self.prompt(REASON_PROMPT)
                 if reason is None:
                     return False
                 return reason.strip() or False
@@ -104,7 +138,7 @@ class _InteractiveTerminal:
             if paused_here:
                 self._resume_live_output()
 
-    def follow_up(self, session_id: str) -> str | None:
+    async def follow_up(self, session_id: str) -> str | None:
         """Prompt for the next conversational turn.
 
         Returns:
@@ -116,7 +150,7 @@ class _InteractiveTerminal:
             "Use /help to list REPL commands."
             "[/dim]"
         )
-        return self.prompt(FLOW_PROMPT)
+        return await self.prompt(FLOW_PROMPT)
 
     def handle_slash_command(self, text: str) -> SlashCommandResult:
         """Handle REPL slash commands.
@@ -162,15 +196,25 @@ class _InteractiveTerminal:
         self.console.print(f"[dim]Auto-approve is {status}.[/dim]")
         return "handled"
 
-    def prompt(self, prompt_text: str) -> str | None:
-        """Read a line from the user, pausing live rendering if needed.
+    async def prompt(self, prompt_text: str) -> str | None:
+        """Read a line from the user with history and auto-suggest.
+
+        Uses prompt_toolkit's ``prompt_async`` when a session is available,
+        falling back to Rich ``console.input`` otherwise.  Pauses live
+        rendering during input to avoid terminal conflicts.
 
         Returns:
             The stripped user input, or None when the prompt is cancelled.
         """
         was_paused_here = self._pause_live_output()
         try:
-            reply = self.console.input(prompt_text).strip()
+            if self.session is not None:
+                reply = await self.session.prompt_async(
+                    prompt_text, auto_suggest=_FlowAutoSuggest()
+                )
+            else:
+                reply = self.console.input(prompt_text)
+            reply = reply.strip()
         except (EOFError, KeyboardInterrupt):
             return None
         finally:
@@ -296,9 +340,9 @@ def _cli_approval(tool_name: str, args: dict) -> bool | str:
     args_str = json.dumps(args, ensure_ascii=False, indent=2)
     console.print(f"\n[bold yellow]Approve:[/] [cyan]{tool_name}[/]")
     console.print(f"  {args_str}")
-    answer = input("Approve? [Y/n] ").strip().lower()
+    answer = input(APPROVE_PROMPT).strip().lower()
     if answer in ("n", "no"):
-        reason = input("Reason (optional): ").strip()
+        reason = input(REASON_PROMPT).strip()
         return reason or False
     return True
 
@@ -306,15 +350,20 @@ def _cli_approval(tool_name: str, args: dict) -> bool | str:
 def _build_deferred_handler(
     on_approval: ApprovalCallback,
 ) -> Callable[
-    [RunContext[OrchestratorDeps], DeferredToolRequests], DeferredToolResults
+    [RunContext[OrchestratorDeps], DeferredToolRequests],
+    DeferredToolResults | Awaitable[DeferredToolResults | None] | None,
 ]:
     """Build a HandleDeferredToolCalls handler from an approval callback.
+
+    The returned handler is async so it can ``await`` an async approval
+    callback (e.g. prompt_toolkit prompts).  Sync callbacks are called
+    directly without ``await``.
 
     Returns:
         Deferred tool call handler function.
     """
 
-    def handler(
+    async def handler(
         _ctx: RunContext[OrchestratorDeps], requests: DeferredToolRequests
     ) -> DeferredToolResults:
         from pydantic_ai import ToolApproved
@@ -324,6 +373,8 @@ def _build_deferred_handler(
         for call in requests.approvals:
             args = call.args_as_dict()
             result = on_approval(call.tool_name, args)
+            if inspect.isawaitable(result):
+                result = await result
             if result is True:
                 approvals[call.tool_call_id] = ToolApproved()
             elif result is False:
@@ -377,6 +428,8 @@ async def run_flow(
         if console is not None and sys.stdin.isatty()
         else None
     )
+    if terminal is not None:
+        terminal.init_prompt_session(deps.session_dir / "prompt-history.txt")
     on_approval = on_approval or (
         terminal.approval if terminal is not None else _cli_approval
     )
@@ -412,7 +465,7 @@ async def run_flow(
     while True:
         if next_prompt is None:
             assert terminal is not None
-            next_prompt = terminal.prompt(FLOW_PROMPT)
+            next_prompt = await terminal.prompt(FLOW_PROMPT)
             if next_prompt is None:
                 return final_output
         command_result = (
@@ -454,7 +507,7 @@ async def run_flow(
             return final_output
 
         assert terminal is not None
-        follow_up = terminal.follow_up(sid)
+        follow_up = await terminal.follow_up(sid)
         if follow_up is None:
             return final_output
         next_prompt = follow_up

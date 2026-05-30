@@ -14,6 +14,7 @@ dependencies = [
     { name = "click" },
     { name = "crowdin-api-client" },
     { name = "platformdirs" },
+    { name = "prompt-toolkit" },
     { name = "pydantic-ai-slim", extra = ["anthropic", "openai", "retries"] },
     { name = "rich" },
     { name = "translate-toolkit", version = "3.17.5", source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }, marker = "python_full_version < '3.11'" },
@@ -55,6 +56,7 @@ requires-dist = [
     { name = "crowdin-api-client", specifier = ">=1.26.0" },
     { name = "mlflow-tracing", marker = "extra == 'mlflow'", specifier = ">=3.1" },
     { name = "platformdirs", specifier = ">=4.0" },
+    { name = "prompt-toolkit", specifier = ">=3.0" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "openai", "retries"], specifier = ">=1.0" },
     { name = "pydantic-ai-slim", extras = ["logfire"], marker = "extra == 'logfire'", specifier = ">=1.0" },
     { name = "rich", specifier = ">=13.0" },
@@ -524,7 +526,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
