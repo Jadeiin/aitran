@@ -100,13 +100,15 @@ async def translate_file(  # noqa: D417
     """Translate a PO or XLIFF file, or all files in a directory.
 
     The file format is auto-detected from the extension. For directories,
-    all .po or .xliff/.xlf files are translated.
+    all ``.po``, ``.xliff``, and ``.xlf`` files are translated.
 
     Args:
-        path: Path to a PO/XLIFF file or a directory of translation files.
+        path: Path to a ``.po``, ``.pot``, ``.xliff``, or ``.xlf`` file, or a
+            directory containing ``.po``, ``.xliff``, or ``.xlf`` files.
         source_lang: Source language code (default: 'en').
         target_lang: Target language code. If empty, inferred from metadata.
-        output_path: Output file path for single-file inputs. Defaults to in-place.
+        output_path: Output file path for single-file inputs. Keep the same
+            translation suffix as the input. Defaults to in-place.
         context_file: Optional text file with extra translation context.
         batch_size: Max units per translation batch.
         jobs: Max files to translate concurrently for directory inputs.
@@ -235,10 +237,12 @@ async def review_translated_file(  # noqa: D417
     reviewer for verdict (pass/revise/reject).
 
     Args:
-        path: Path to a translated PO or XLIFF file.
+        path: Path to a translated ``.po``, ``.pot``, ``.xliff``, or ``.xlf``
+            file.
         source_lang: Source language code (default: 'en').
         target_lang: Target language code. If empty, inferred from metadata.
-        output_path: Output file path. Defaults to in-place review.
+        output_path: Output file path. Keep the same translation suffix as the
+            input. Defaults to in-place review.
         batch_size: Max units per review batch.
         strict: If true, review every unit instead of only flagged ones.
         auto_fix: If true, write corrected targets back to the file.

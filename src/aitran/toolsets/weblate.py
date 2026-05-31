@@ -169,7 +169,8 @@ async def download_translation(  # noqa: RUF029, D417
     Args:
         object_path: Weblate translation path
             (<project>/<component>/<language>).
-        output_path: Local file path to save the download.
+        output_path: Local file path to save the download. Must end with
+            ``.po``, ``.xliff``, or ``.xlf``.
         untranslated_only: If true, download only untranslated strings.
 
     Returns:
@@ -215,7 +216,8 @@ async def upload_translation(  # noqa: RUF029, D417
     Args:
         object_path: Weblate translation path
             (<project>/<component>/<language>).
-        file_path: Local translation file to upload.
+        file_path: Local translation file to upload. Must end with ``.po``,
+            ``.xliff``, or ``.xlf``.
         method: Upload method
             (translate, approve, suggest, fuzzy, replace, source, add).
 

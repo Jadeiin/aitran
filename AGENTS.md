@@ -7,12 +7,15 @@ This file provides guidance to Coding agents when working with code in this repo
 ```bash
 uv run pytest                          # run all tests
 uv run pytest tests/test_translate.py  # run a single test file
+uv run pytest tests/test_app.py        # run interactive app tests
 uv run pytest -k test_pattern          # run by keyword
 uv run ruff check --fix                # lint + auto-fix
 uv run ruff format                     # format
 
 uvx prek install                       # install pre-commit hooks (uses `prek`, NOT `pre-commit`)
 uv run aitran --po file.po -l zh       # run the CLI
+uv run aitran                          # launch the interactive app
+uv run aitran --prompt "translate this project to zh"  # one-shot app prompt
 ```
 
 Python 3.10+. Package manager: `uv`. Build backend: `uv_build`.
@@ -31,7 +34,8 @@ format.
 
 Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (Click group).
 
-- `cli.py` — Click CLI with `translate` (default command), `sync`, `remove`, `userdict`, `crowdin`, `weblate` subcommands
+- `cli.py` — Click CLI; bare `aitran` launches the interactive app, and `translate`, `review`, `sync`, `remove`, `userdict`, `crowdin`, `weblate` remain as subcommands
+- `app.py` — interactive app session management, REPL, resume handling, and deferred-tool approval loop
 - `agents/` — pydantic-ai agent definitions:
   - `_base.py` — model routing (`build_model`), XML prompt builder (`build_input_xml`), shared helpers
   - `translator.py` — translator agent (`build_translator_agent`), output types (`TranslatedUnit` / `TranslationBatch`), prompts
@@ -55,6 +59,13 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 ### Model routing
 
 `build_model()` in `agents/_base.py` splits on `:` to get provider:model. Anthropic gets special `AnthropicModel` with prompt caching; all other providers route through `OpenAIChatModel` using pydantic-ai's `infer_provider_class()`. Unknown providers fall back to `OpenAIProvider` (OpenAI-compatible gateways).
+
+### Interactive app
+
+- Top-level entry: `aitran`
+- One-shot prompt: `aitran --prompt "..."`
+- Resume: `aitran --resume --session-id <id>`
+- Environment for the app entry still uses the `AITRAN_FLOW_*` names for orchestrator settings (`AITRAN_FLOW_MODEL`, `AITRAN_FLOW_KEY`, `AITRAN_FLOW_AUTO_APPROVE`)
 
 ## Conventions & Gotchas
 

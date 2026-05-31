@@ -220,7 +220,8 @@ async def download_translation(  # noqa: RUF029, D417
         project: Crowdin project name or ID.
         file_id: Crowdin source file ID.
         language: Target language code.
-        output_path: Local file path to save the download.
+        output_path: Local file path to save the download. Must end with
+            ``.xliff`` or ``.xlf``.
 
     Returns:
         Confirmation message with output path.
@@ -270,7 +271,8 @@ async def upload_translation(  # noqa: RUF029, D417
         project: Crowdin project name or ID.
         file_id: Crowdin source file ID.
         language: Target language code.
-        file_path: Local translation file to upload.
+        file_path: Local translation file to upload. Must end with
+            ``.xliff`` or ``.xlf``.
 
     Returns:
         Confirmation message.

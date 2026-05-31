@@ -30,22 +30,22 @@ export ANTHROPIC_API_KEY=sk-...  # Anthropic
 
 ### Agentic workflows
 
-`aitran flow` launches an agent-driven interactive session. The agent
+`aitran` launches an agent-driven interactive session. The agent
 inspects your project, proposes a plan, and executes each step
 (download, translate, review, upload) with your approval.
 
 ```bash
 # Interactive REPL — multi-turn conversation with session persistence
-aitran flow
+aitran
 
 # One-shot: give the agent a natural-language request
-aitran flow "translate Crowdin project MyApp to Chinese"
+aitran --prompt "translate Crowdin project MyApp to Chinese"
 
 # Resume a previous session
-aitran flow --resume --session-id abc123
+aitran --resume --session-id abc123
 
 # Use a different orchestrator model
-aitran flow -m openai:gpt-5.4-mini "translate Weblate component app/zh_Hans"
+aitran -m openai:gpt-5.4-mini --prompt "translate Weblate component app/zh_Hans"
 ```
 
 The orchestrator agent uses a separate model (default
@@ -90,9 +90,9 @@ Models are specified in `<provider>:<model>` format:
 
 | Variable | Description |
 |---|---|
-| `AITRAN_FLOW_MODEL` | Orchestrator model for `flow` (default: `anthropic:claude-sonnet-4-6`) |
+| `AITRAN_FLOW_MODEL` | Orchestrator model for the top-level interactive app (default: `anthropic:claude-sonnet-4-6`) |
 | `AITRAN_FLOW_KEY` | API key for the orchestrator model |
-| `AITRAN_FLOW_AUTO_APPROVE` | Auto-approve tools in `flow` (`1`, `true`, etc.) |
+| `AITRAN_FLOW_AUTO_APPROVE` | Auto-approve tools in the interactive app (`1`, `true`, etc.) |
 | `AITRAN_API_KEY` / `OPENAI_API_KEY` | API key |
 | `AITRAN_API_HOST` | Custom API base URL |
 | `AITRAN_MODEL` | Default model (default: `deepseek:deepseek-v4-flash`) |
@@ -110,20 +110,28 @@ Models are specified in `<provider>:<model>` format:
 
 ## CLI Reference
 
-### flow
+### app
 
 ```
-aitran flow [PROMPT] [options]
+aitran [options]
 ```
 
 Agentic translation workflow. The agent inspects, downloads, translates,
 reviews, and uploads translations on supported localization platforms
-with your approval at each write step. If `PROMPT` is omitted, starts
-an interactive REPL with persistent history and session management.
+with your approval at each write step. If `--prompt` is omitted, `aitran`
+starts an interactive REPL with persistent history and session management.
 
 **REPL commands:** `/help`, `/approve on|off|status`, `/resume [id]`, `/exit`
 
-Use `aitran flow --help` for the full list of options.
+Examples:
+
+```bash
+aitran
+aitran --prompt "translate Crowdin project MyApp to Chinese"
+aitran --resume --session-id abc123
+```
+
+Use `aitran --help` for the full list of options.
 
 ### translate
 
@@ -157,7 +165,7 @@ Use `aitran translate --help` for the full list of options.
 
 ### Observability
 
-Both `translate` and `flow` support distributed tracing via Logfire and
+Both `translate` and the top-level interactive app support distributed tracing via Logfire and
 MLflow.
 
 **Logfire:**
