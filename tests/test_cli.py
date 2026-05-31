@@ -1,7 +1,5 @@
 """Tests for the Click CLI wiring."""
 
-import asyncio
-
 from click.testing import CliRunner
 
 from aitran import cli
@@ -111,7 +109,7 @@ def test_translate_command_enables_mlflow(monkeypatch, tmp_path):
     assert calls[4] == ("flush_mlflow", True)
 
 
-def test_flow_command_allows_missing_prompt(monkeypatch):
+def test_top_level_app_allows_missing_prompt(monkeypatch):
     calls = []
 
     def disabled(**_kwargs) -> bool:
@@ -121,7 +119,7 @@ def test_flow_command_allows_missing_prompt(monkeypatch):
     def noop(**_kwargs) -> None:
         del _kwargs
 
-    async def fake_run_flow(
+    def fake_run_app(
         prompt,
         *,
         orchestrator_model,
@@ -133,17 +131,14 @@ def test_flow_command_allows_missing_prompt(monkeypatch):
         console,
     ):
         del deps, console
-        calls.append(
-            (
-                prompt,
-                orchestrator_model,
-                orchestrator_api_key,
-                session_id,
-                resume,
-                auto_approve,
-            )
-        )
-        await asyncio.sleep(0)
+        calls.append((
+            prompt,
+            orchestrator_model,
+            orchestrator_api_key,
+            session_id,
+            resume,
+            auto_approve,
+        ))
         return ""
 
     monkeypatch.setattr(cli, "setup_logfire", disabled)
@@ -154,11 +149,11 @@ def test_flow_command_allows_missing_prompt(monkeypatch):
     import sys
     import types
 
-    fake_module = types.ModuleType("aitran.flow")
-    fake_module.run_flow = fake_run_flow
-    monkeypatch.setitem(sys.modules, "aitran.flow", fake_module)
+    fake_module = types.ModuleType("aitran.app")
+    fake_module.run_app = fake_run_app
+    monkeypatch.setitem(sys.modules, "aitran.app", fake_module)
 
-    result = CliRunner().invoke(cli.app, ["flow"], env={})
+    result = CliRunner().invoke(cli.app, [], env={})
 
     assert result.exit_code == 0
     assert len(calls) == 1
@@ -169,7 +164,7 @@ def test_flow_command_allows_missing_prompt(monkeypatch):
     assert auto_approve is False
 
 
-def test_flow_command_passes_auto_approve(monkeypatch):
+def test_default_command_launches_app(monkeypatch):
     calls = []
 
     def disabled(**_kwargs) -> bool:
@@ -179,7 +174,7 @@ def test_flow_command_passes_auto_approve(monkeypatch):
     def noop(**_kwargs) -> None:
         del _kwargs
 
-    async def fake_run_flow(
+    def fake_run_app(
         prompt,
         *,
         orchestrator_model,
@@ -192,7 +187,6 @@ def test_flow_command_passes_auto_approve(monkeypatch):
     ):
         del orchestrator_model, orchestrator_api_key, deps, session_id, resume, console
         calls.append((prompt, auto_approve))
-        await asyncio.sleep(0)
         return ""
 
     monkeypatch.setattr(cli, "setup_logfire", disabled)
@@ -203,12 +197,14 @@ def test_flow_command_passes_auto_approve(monkeypatch):
     import sys
     import types
 
-    fake_module = types.ModuleType("aitran.flow")
-    fake_module.run_flow = fake_run_flow
-    monkeypatch.setitem(sys.modules, "aitran.flow", fake_module)
+    fake_module = types.ModuleType("aitran.app")
+    fake_module.run_app = fake_run_app
+    monkeypatch.setitem(sys.modules, "aitran.app", fake_module)
 
     result = CliRunner().invoke(
-        cli.app, ["flow", "--auto-approve", "translate this"], env={}
+        cli.app,
+        ["--auto-approve", "--prompt", "translate this"],
+        env={},
     )
 
     assert result.exit_code == 0

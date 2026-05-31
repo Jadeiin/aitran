@@ -1,4 +1,4 @@
-"""Tests for interactive orchestrator flow behavior."""
+"""Tests for interactive app behavior."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from pydantic_ai import DeferredToolRequests
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 
-from aitran import flow
+from aitran import app
 from aitran.toolsets._base import OrchestratorDeps
 
 if TYPE_CHECKING:
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 PLAN_TEXT = "执行计划\n\n是否按此计划执行?"
 DONE_TEXT = "已执行完成。"
-FLOW_PROMPT = "aitran flow> "
+APP_PROMPT = "aitran> "
 
 
 def _noop_init_prompt_session(_self: object, *_args: object, **_kwargs: object) -> None:
@@ -66,7 +66,7 @@ def _fake_builder(*_args, **_kwargs) -> object:
     return object()
 
 
-async def test_run_flow_continues_interactively(monkeypatch, tmp_path: Path):
+async def test_run_app_continues_interactively(monkeypatch, tmp_path: Path):
     calls: list[tuple[str, list[ModelResponse]]] = []
     outputs = [[_response(PLAN_TEXT)], [_response(DONE_TEXT)]]
 
@@ -78,28 +78,28 @@ async def test_run_flow_continues_interactively(monkeypatch, tmp_path: Path):
         calls.append((prompt, list(messages)))
         return outputs.pop(0)
 
-    monkeypatch.setattr(flow, "build_orchestrator_model", _fake_builder)
-    monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
-    monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
-    monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
+    monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
+    monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(
-        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+        app._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
     )
 
     console = DummyConsole(["继续执行", ""])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
 
-    result = await flow.run_flow("先看看状态", deps=deps, console=console)
+    result = await app.run_app_async("先看看状态", deps=deps, console=console)
 
     assert result == DONE_TEXT
     assert [prompt for prompt, _ in calls] == ["先看看状态", "继续执行"]
     assert calls[0][1] == []
     assert calls[1][1][0].text == PLAN_TEXT
-    assert console.prompts == [FLOW_PROMPT, FLOW_PROMPT]
+    assert console.prompts == [APP_PROMPT, APP_PROMPT]
     assert len(list(deps.session_dir.glob("*.json"))) == 1
 
 
-async def test_run_flow_stays_one_shot_without_tty(monkeypatch, tmp_path: Path):
+async def test_run_app_stays_one_shot_without_tty(monkeypatch, tmp_path: Path):
     calls: list[str] = []
 
     async def fake_run_streaming(
@@ -110,22 +110,22 @@ async def test_run_flow_stays_one_shot_without_tty(monkeypatch, tmp_path: Path):
         calls.append(prompt)
         return [_response(PLAN_TEXT)]
 
-    monkeypatch.setattr(flow, "build_orchestrator_model", _fake_builder)
-    monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
-    monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
-    monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
+    monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
+    monkeypatch.setattr(app.sys.stdin, "isatty", lambda: False)
 
     console = DummyConsole([])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
 
-    result = await flow.run_flow("先看看状态", deps=deps, console=console)
+    result = await app.run_app_async("先看看状态", deps=deps, console=console)
 
     assert result == PLAN_TEXT
     assert calls == ["先看看状态"]
     assert console.prompts == []
 
 
-async def test_run_flow_enters_repl_when_prompt_missing(monkeypatch, tmp_path: Path):
+async def test_run_app_enters_repl_when_prompt_missing(monkeypatch, tmp_path: Path):
     calls: list[str] = []
 
     async def fake_run_streaming(
@@ -136,25 +136,25 @@ async def test_run_flow_enters_repl_when_prompt_missing(monkeypatch, tmp_path: P
         calls.append(prompt)
         return [_response(DONE_TEXT)]
 
-    monkeypatch.setattr(flow, "build_orchestrator_model", _fake_builder)
-    monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
-    monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
-    monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
+    monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
+    monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(
-        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+        app._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
     )
 
     console = DummyConsole(["翻译这个组件", ""])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
 
-    result = await flow.run_flow(None, deps=deps, console=console)
+    result = await app.run_app_async(None, deps=deps, console=console)
 
     assert result == DONE_TEXT
     assert calls == ["翻译这个组件"]
-    assert console.prompts == [FLOW_PROMPT, FLOW_PROMPT]
+    assert console.prompts == [APP_PROMPT, APP_PROMPT]
 
 
-async def test_run_flow_handles_approve_slash_command(monkeypatch, tmp_path: Path):
+async def test_run_app_handles_approve_slash_command(monkeypatch, tmp_path: Path):
     calls: list[str] = []
 
     async def fake_run_streaming(
@@ -165,25 +165,25 @@ async def test_run_flow_handles_approve_slash_command(monkeypatch, tmp_path: Pat
         calls.append(prompt)
         return [_response(DONE_TEXT)]
 
-    monkeypatch.setattr(flow, "build_orchestrator_model", _fake_builder)
-    monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
-    monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
-    monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
+    monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
+    monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(
-        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+        app._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
     )
 
     console = DummyConsole(["/approve on", "翻译这个组件", ""])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
 
-    result = await flow.run_flow(None, deps=deps, console=console)
+    result = await app.run_app_async(None, deps=deps, console=console)
 
     assert result == DONE_TEXT
     assert calls == ["翻译这个组件"]
     assert "Auto-approve is on." in console.printed[0]
 
 
-async def test_run_flow_handles_exit_slash_command(monkeypatch, tmp_path: Path):
+async def test_run_app_handles_exit_slash_command(monkeypatch, tmp_path: Path):
     calls: list[str] = []
 
     async def fake_run_streaming(
@@ -194,34 +194,34 @@ async def test_run_flow_handles_exit_slash_command(monkeypatch, tmp_path: Path):
         calls.append(prompt)
         return [_response(DONE_TEXT)]
 
-    monkeypatch.setattr(flow, "build_orchestrator_model", _fake_builder)
-    monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
-    monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
-    monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
+    monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
+    monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(
-        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+        app._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
     )
 
     console = DummyConsole(["/exit"])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
 
-    result = await flow.run_flow(None, deps=deps, console=console)
+    result = await app.run_app_async(None, deps=deps, console=console)
 
     assert result == ""
     assert calls == []
-    assert "Exiting flow." in console.printed[0]
+    assert "Exiting app." in console.printed[0]
 
 
 async def test_interactive_terminal_pauses_live_while_prompting():
     console = DummyConsole(["继续执行"])
     live = DummyLive()
-    terminal = flow._InteractiveTerminal(console=console, current_live=live)
+    terminal = app._InteractiveTerminal(console=console, current_live=live)
     terminal.current_output = "当前模型输出"
 
-    reply = await terminal.prompt(FLOW_PROMPT)
+    reply = await terminal.prompt(APP_PROMPT)
 
     assert reply == "继续执行"
-    assert console.prompts == [FLOW_PROMPT]
+    assert console.prompts == [APP_PROMPT]
     assert live.events == ["stop", "start:True"]
     assert live.is_started is True
     assert terminal.persisted_output == "当前模型输出"
@@ -230,7 +230,7 @@ async def test_interactive_terminal_pauses_live_while_prompting():
 
 async def test_interactive_terminal_approval_uses_shared_console():
     console = DummyConsole(["n", "参数不对"])
-    terminal = flow._InteractiveTerminal(console=console)
+    terminal = app._InteractiveTerminal(console=console)
 
     result = await terminal.approval("translate_file", {"path": "demo.po"})
 
@@ -244,7 +244,7 @@ async def test_interactive_terminal_approval_uses_shared_console():
 async def test_interactive_terminal_approval_preserves_output_order():
     console = DummyConsole([""])
     live = DummyLive()
-    terminal = flow._InteractiveTerminal(console=console, current_live=live)
+    terminal = app._InteractiveTerminal(console=console, current_live=live)
     terminal.current_output = "先下载文件:"
 
     args = {"object_path": "demo/path"}
@@ -260,7 +260,7 @@ async def test_interactive_terminal_approval_preserves_output_order():
 def test_interactive_terminal_reports_completed_tool():
     console = DummyConsole([])
     live = DummyLive()
-    terminal = flow._InteractiveTerminal(console=console, current_live=live)
+    terminal = app._InteractiveTerminal(console=console, current_live=live)
     terminal.current_output = "执行中"
 
     terminal.report_tool_result("translate_file", "Translated PO file: demo.po", True)
@@ -273,7 +273,7 @@ def test_interactive_terminal_reports_completed_tool():
 
 async def test_interactive_terminal_auto_approves_when_enabled():
     console = DummyConsole([])
-    terminal = flow._InteractiveTerminal(console=console, auto_approve=True)
+    terminal = app._InteractiveTerminal(console=console, auto_approve=True)
 
     result = await terminal.approval("translate_file", {"path": "demo.po"})
 
@@ -283,7 +283,7 @@ async def test_interactive_terminal_auto_approves_when_enabled():
 
 def test_interactive_terminal_handles_approve_status_command():
     console = DummyConsole([])
-    terminal = flow._InteractiveTerminal(console=console)
+    terminal = app._InteractiveTerminal(console=console)
 
     handled = terminal.handle_slash_command("/approve status")
 
@@ -293,7 +293,7 @@ def test_interactive_terminal_handles_approve_status_command():
 
 def test_interactive_terminal_handles_help_command():
     console = DummyConsole([])
-    terminal = flow._InteractiveTerminal(console=console)
+    terminal = app._InteractiveTerminal(console=console)
 
     result = terminal.handle_slash_command("/help")
 
@@ -304,7 +304,7 @@ def test_interactive_terminal_handles_help_command():
 
 def test_interactive_terminal_handles_unknown_command():
     console = DummyConsole([])
-    terminal = flow._InteractiveTerminal(console=console)
+    terminal = app._InteractiveTerminal(console=console)
 
     result = terminal.handle_slash_command("/wat")
 
@@ -320,7 +320,7 @@ async def test_deferred_handler_parses_tool_args_from_json():
         seen.append(args)
         return True
 
-    handler = flow._build_deferred_handler(on_approval)
+    handler = app._build_deferred_handler(on_approval)
     requests = DeferredToolRequests(
         approvals=[
             ToolCallPart(
@@ -350,7 +350,7 @@ def test_list_sessions_returns_sorted_entries(tmp_path: Path):
     new = session_dir / "bbb.json"
     new.write_bytes(ModelMessagesTypeAdapter.dump_json([]))
 
-    entries = flow.list_sessions(base=session_dir)
+    entries = app.list_sessions(base=session_dir)
 
     assert len(entries) == 2
     assert entries[0][0] == "bbb"  # newest first
@@ -363,14 +363,14 @@ def test_list_sessions_skips_corrupt_files(tmp_path: Path):
     (session_dir / "bad.json").write_text("not valid json")
     (session_dir / "empty.json").write_text("[]")
 
-    entries = flow.list_sessions(base=session_dir)
+    entries = app.list_sessions(base=session_dir)
 
     # bad.json is skipped; empty.json has 0 messages but is valid.
     assert len(entries) == 1
     assert entries[0][0] == "empty"
 
 
-async def test_run_flow_handles_resume_by_id(monkeypatch, tmp_path: Path):
+async def test_run_app_handles_resume_by_id(monkeypatch, tmp_path: Path):
     from pydantic_ai.messages import ModelMessagesTypeAdapter
 
     calls: list[str] = []
@@ -384,12 +384,12 @@ async def test_run_flow_handles_resume_by_id(monkeypatch, tmp_path: Path):
         calls.append(prompt)
         return outputs.pop(0)
 
-    monkeypatch.setattr(flow, "build_orchestrator_model", _fake_builder)
-    monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
-    monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
-    monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
+    monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
+    monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(
-        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+        app._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
     )
 
     # Pre-create a session file.
@@ -403,7 +403,7 @@ async def test_run_flow_handles_resume_by_id(monkeypatch, tmp_path: Path):
     console = DummyConsole(["/resume old123", "继续执行", ""])
     deps = OrchestratorDeps(session_dir=session_dir)
 
-    result = await flow.run_flow(None, deps=deps, console=console)
+    result = await app.run_app_async(None, deps=deps, console=console)
 
     assert result == DONE_TEXT
     assert calls == ["继续执行"]
@@ -411,7 +411,7 @@ async def test_run_flow_handles_resume_by_id(monkeypatch, tmp_path: Path):
     assert any(PLAN_TEXT in line for line in console.printed)
 
 
-async def test_run_flow_handles_resume_selection(monkeypatch, tmp_path: Path):
+async def test_run_app_handles_resume_selection(monkeypatch, tmp_path: Path):
     from pydantic_ai.messages import ModelMessagesTypeAdapter
 
     calls: list[str] = []
@@ -425,12 +425,12 @@ async def test_run_flow_handles_resume_selection(monkeypatch, tmp_path: Path):
         calls.append(prompt)
         return outputs.pop(0)
 
-    monkeypatch.setattr(flow, "build_orchestrator_model", _fake_builder)
-    monkeypatch.setattr(flow, "build_orchestrator_agent", _fake_builder)
-    monkeypatch.setattr(flow, "_run_streaming", fake_run_streaming)
-    monkeypatch.setattr(flow.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
+    monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
+    monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(
-        flow._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
+        app._InteractiveTerminal, "init_prompt_session", _noop_init_prompt_session
     )
 
     # Pre-create a session file.
@@ -444,7 +444,7 @@ async def test_run_flow_handles_resume_selection(monkeypatch, tmp_path: Path):
     console = DummyConsole(["/resume", "1", "继续执行", ""])
     deps = OrchestratorDeps(session_dir=session_dir)
 
-    result = await flow.run_flow(None, deps=deps, console=console)
+    result = await app.run_app_async(None, deps=deps, console=console)
 
     assert result == DONE_TEXT
     assert calls == ["继续执行"]
@@ -455,7 +455,7 @@ async def test_run_flow_handles_resume_selection(monkeypatch, tmp_path: Path):
 
 async def test_handle_resume_no_sessions(tmp_path: Path):
     console = DummyConsole([])
-    terminal = flow._InteractiveTerminal(console=console)
+    terminal = app._InteractiveTerminal(console=console)
     session_dir = tmp_path / "sessions"
     session_dir.mkdir()
 

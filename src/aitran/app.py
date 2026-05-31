@@ -1,7 +1,8 @@
-"""Orchestrator flow — session management and deferred-tool run loop."""
+"""Interactive app — session management and deferred-tool run loop."""
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import sys
@@ -42,7 +43,7 @@ if TYPE_CHECKING:
 # May be sync or async (prompt_toolkit prompts are async).
 ApprovalCallback = Callable[[str, dict], bool | str | Awaitable[bool | str]]
 SlashCommandResult = str
-FLOW_PROMPT = "aitran flow> "
+APP_PROMPT = "aitran> "
 APPROVE_PROMPT = "Approve? [Y/n] "
 REASON_PROMPT = "Reason (optional): "
 
@@ -53,14 +54,14 @@ _SLASH_COMMAND_HELP = {
     "/approve status": "Show whether automatic approval is enabled.",
     "/resume": "List saved sessions and restore one.",
     "/resume <id>": "Restore a specific session by ID.",
-    "/exit": "Exit the flow REPL.",
-    "/quit": "Exit the flow REPL.",
+    "/exit": "Exit the app REPL.",
+    "/quit": "Exit the app REPL.",
 }
 
 _SLASH_COMMANDS = list(_SLASH_COMMAND_HELP)
 
 
-class _FlowAutoSuggest(AutoSuggestFromHistory):
+class _AppAutoSuggest(AutoSuggestFromHistory):
     """Auto-suggest slash commands in addition to history."""
 
     def __init__(self) -> None:
@@ -157,7 +158,7 @@ class _InteractiveTerminal:
             "Use /help to list REPL commands."
             "[/dim]"
         )
-        return await self.prompt(FLOW_PROMPT)
+        return await self.prompt(APP_PROMPT)
 
     def handle_slash_command(self, text: str) -> SlashCommandResult:
         """Handle REPL slash commands.
@@ -171,7 +172,7 @@ class _InteractiveTerminal:
             return "unhandled"
 
         if command in {"/exit", "/quit"}:
-            self.console.print("[dim]Exiting flow.[/dim]")
+            self.console.print("[dim]Exiting app.[/dim]")
             return "exit"
         if command == "/help":
             self.console.print("[dim]Available REPL commands:[/dim]")
@@ -223,9 +224,7 @@ class _InteractiveTerminal:
             try:
                 session = load_session(target_id, base=session_dir)
             except FileNotFoundError:
-                self.console.print(
-                    f"[yellow]Session not found:[/] {target_id}"
-                )
+                self.console.print(f"[yellow]Session not found:[/] {target_id}")
                 return None
             return self._finish_resume(target_id, session)
 
@@ -237,9 +236,7 @@ class _InteractiveTerminal:
         self.console.print("[dim]Saved sessions:[/dim]")
         for idx, (sid, mtime, count) in enumerate(entries, 1):
             ts = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")  # noqa: DTZ006
-            self.console.print(
-                f"  [cyan]{idx}[/]  {sid}  {ts}  ({count} messages)"
-            )
+            self.console.print(f"  [cyan]{idx}[/]  {sid}  {ts}  ({count} messages)")
 
         choice = await self._read_line("Session number: ")
         if choice is None:
@@ -263,8 +260,7 @@ class _InteractiveTerminal:
             Messages and session ID tuple.
         """
         self.console.print(
-            f"[dim]Resumed session {sid} "
-            f"({len(session.messages)} messages).[/dim]"
+            f"[dim]Resumed session {sid} ({len(session.messages)} messages).[/dim]"
         )
         self._replay_messages(session.messages)
         return session.messages, sid
@@ -306,7 +302,7 @@ class _InteractiveTerminal:
             if self.session is not None:
                 if record_history:
                     reply = await self.session.prompt_async(
-                        prompt_text, auto_suggest=_FlowAutoSuggest()
+                        prompt_text, auto_suggest=_AppAutoSuggest()
                     )
                 else:
                     session = self._ephemeral_session or self.session
@@ -520,7 +516,7 @@ def _build_deferred_handler(
     return handler
 
 
-async def run_flow(
+async def run_app_async(
     prompt: str | None,
     *,
     orchestrator_model: str | None = None,
@@ -532,23 +528,21 @@ async def run_flow(
     on_approval: ApprovalCallback | None = None,
     console: Console | None = None,
 ) -> str:
-    """Run the orchestrator flow with deferred-tool approval.
+    """Run the interactive app with deferred-tool approval.
 
     Args:
         prompt: Optional initial natural-language request.
         orchestrator_model: Model spec for the orchestrator agent.
         orchestrator_api_key: API key for the orchestrator model.
-        deps: Orchestrator dependencies (credentials, config).
+        deps: Orchestrator dependencies.
         session_id: Session ID to resume.
         resume: Whether to resume from a saved session.
         auto_approve: Whether approvals should be granted automatically.
         on_approval: Callback for tool approval decisions.
-            Defaults to CLI stdin prompt.
         console: Rich Console for streaming text output.
-            When provided, agent responses are streamed live.
 
     Returns:
-        Final text output from the orchestrator.
+        Final text output from the app.
     """
     deps = deps or OrchestratorDeps()
     terminal = (
@@ -593,7 +587,7 @@ async def run_flow(
     while True:
         if next_prompt is None:
             assert terminal is not None
-            next_prompt = await terminal.prompt(FLOW_PROMPT)
+            next_prompt = await terminal.prompt(APP_PROMPT)
             if next_prompt is None:
                 return final_output
 
@@ -733,3 +727,35 @@ def _extract_output(messages: list[ModelMessage]) -> str:
             if text:
                 return text
     return ""
+
+
+def run_app(
+    prompt: str | None,
+    *,
+    orchestrator_model: str | None = None,
+    orchestrator_api_key: str | None = None,
+    deps: OrchestratorDeps | None = None,
+    session_id: str | None = None,
+    resume: bool = False,
+    auto_approve: bool = False,
+    on_approval: ApprovalCallback | None = None,
+    console: Console | None = None,
+) -> str:
+    """Run the interactive app synchronously.
+
+    Returns:
+        Final text output from the app.
+    """
+    return asyncio.run(
+        run_app_async(
+            prompt,
+            orchestrator_model=orchestrator_model,
+            orchestrator_api_key=orchestrator_api_key,
+            deps=deps,
+            session_id=session_id,
+            resume=resume,
+            auto_approve=auto_approve,
+            on_approval=on_approval,
+            console=console,
+        )
+    )

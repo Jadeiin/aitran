@@ -222,15 +222,164 @@ def _observability(
         flush_mlflow(enabled=mlflow_enabled)
 
 
-@click.group(context_settings=CONTEXT_SETTINGS)
+@click.group(context_settings=CONTEXT_SETTINGS, invoke_without_command=True)
 @click.version_option(message="%(prog)s %(version)s")
-def app() -> None:
+@click.option(
+    "-p",
+    "--prompt",
+    help="Initial natural-language request for the interactive app.",
+)
+@click.option(
+    "-m",
+    "--model",
+    "orchestrator_model",
+    envvar="AITRAN_FLOW_MODEL",
+    help=(
+        "Model for the orchestrator agent (provider:model format). "
+        "Defaults to anthropic:claude-sonnet-4-6."
+    ),
+)
+@click.option(
+    "-k",
+    "--key",
+    "orchestrator_key",
+    envvar="AITRAN_FLOW_KEY",
+    help="API key for the orchestrator model",
+)
+@click.option(
+    "--crowdin-token",
+    envvar="AITRAN_CROWDIN_TOKEN",
+    help="Crowdin API token",
+)
+@click.option(
+    "--crowdin-org",
+    envvar="AITRAN_CROWDIN_ORG",
+    help="Crowdin organization (Enterprise only)",
+)
+@click.option(
+    "--crowdin-url",
+    envvar="AITRAN_CROWDIN_BASE_URL",
+    help="Crowdin API base URL override",
+)
+@click.option(
+    "--weblate-url",
+    envvar="AITRAN_WEBLATE_URL",
+    help="Weblate base URL",
+)
+@click.option(
+    "--weblate-token",
+    envvar="AITRAN_WEBLATE_TOKEN",
+    help="Weblate API token",
+)
+@click.option(
+    "--translate-model",
+    envvar="AITRAN_MODEL",
+    default="deepseek:deepseek-v4-flash",
+    show_default=True,
+    help="Model for translation/review tasks",
+)
+@click.option(
+    "--translate-key",
+    envvar="AITRAN_API_KEY",
+    help="API key for the translation model",
+)
+@click.option(
+    "--translate-host",
+    envvar="AITRAN_API_HOST",
+    help="Custom API base URL for the translation model",
+)
+@click.option(
+    "--translate-temperature",
+    envvar="AITRAN_MODEL_TMP",
+    type=float,
+    default=0.1,
+    show_default=True,
+    help="LLM temperature for translation/review tasks.",
+)
+@click.option(
+    "--session-id",
+    help="Session ID to resume or name a new session",
+)
+@click.option(
+    "--resume",
+    is_flag=True,
+    help="Resume from a saved session",
+)
+@click.option(
+    "--auto-approve",
+    is_flag=True,
+    envvar="AITRAN_FLOW_AUTO_APPROVE",
+    help="Automatically approve tools that require confirmation.",
+)
+@_observability_options
+@click.pass_context
+def app(
+    ctx: click.Context,
+    prompt: str | None,
+    orchestrator_model: str | None,
+    orchestrator_key: str | None,
+    crowdin_token: str | None,
+    crowdin_org: str | None,
+    crowdin_url: str | None,
+    weblate_url: str | None,
+    weblate_token: str | None,
+    translate_model: str,
+    translate_key: str | None,
+    translate_host: str | None,
+    translate_temperature: float,
+    session_id: str | None,
+    resume: bool,
+    auto_approve: bool,
+    logfire: bool,
+    logfire_capture_http: bool,
+    mlflow: bool,
+    mlflow_tracking_uri: str | None,
+    mlflow_experiment: str | None,
+) -> None:
     """Aitran — Translate PO and XLIFF files using LLMs.
 
     Built on Pydantic AI. Supports OpenAI, Anthropic, and any OpenAI-compatible
     provider; specify models as `<provider>:<model>` (e.g. `openai:gpt-5.4-mini`,
     `anthropic:claude-haiku-4-5`).
     """
+    if ctx.invoked_subcommand is not None:
+        return
+
+    from rich.console import Console
+
+    from aitran.app import run_app
+    from aitran.toolsets._base import OrchestratorDeps
+
+    console = Console()
+
+    with _observability(
+        logfire=logfire,
+        logfire_capture_http=logfire_capture_http,
+        mlflow=mlflow,
+        mlflow_tracking_uri=mlflow_tracking_uri,
+        mlflow_experiment=mlflow_experiment,
+    ):
+        deps = OrchestratorDeps(
+            crowdin_token=crowdin_token,
+            crowdin_organization=crowdin_org,
+            crowdin_base_url=crowdin_url,
+            weblate_url=weblate_url,
+            weblate_token=weblate_token,
+            translate_model=translate_model,
+            translate_api_key=translate_key,
+            translate_api_host=translate_host,
+            translate_temperature=translate_temperature,
+        )
+        run_app(
+            prompt,
+            orchestrator_model=orchestrator_model,
+            orchestrator_api_key=orchestrator_key,
+            deps=deps,
+            session_id=session_id,
+            resume=resume,
+            auto_approve=auto_approve,
+            console=console,
+        )
 
 
 @app.command(
@@ -1057,148 +1206,3 @@ def userdict(explore: bool, lang: str | None) -> None:
         if not lang:
             copy_file_if_not_exists(dict_file, default_dict)
         open_file_by_default(dict_file)
-
-
-@app.command("flow", context_settings=CONTEXT_SETTINGS)
-@click.argument("prompt", required=False)
-@click.option(
-    "-m",
-    "--model",
-    "orchestrator_model",
-    envvar="AITRAN_FLOW_MODEL",
-    help=(
-        "Model for the orchestrator agent (provider:model format). "
-        "Defaults to anthropic:claude-sonnet-4-6."
-    ),
-)
-@click.option(
-    "-k",
-    "--key",
-    "orchestrator_key",
-    envvar="AITRAN_FLOW_KEY",
-    help="API key for the orchestrator model",
-)
-@click.option(
-    "--crowdin-token",
-    envvar="AITRAN_CROWDIN_TOKEN",
-    help="Crowdin API token",
-)
-@click.option(
-    "--crowdin-org",
-    envvar="AITRAN_CROWDIN_ORG",
-    help="Crowdin organization (Enterprise only)",
-)
-@click.option(
-    "--crowdin-url",
-    envvar="AITRAN_CROWDIN_BASE_URL",
-    help="Crowdin API base URL override",
-)
-@click.option(
-    "--weblate-url",
-    envvar="AITRAN_WEBLATE_URL",
-    help="Weblate base URL",
-)
-@click.option(
-    "--weblate-token",
-    envvar="AITRAN_WEBLATE_TOKEN",
-    help="Weblate API token",
-)
-@click.option(
-    "--translate-model",
-    envvar="AITRAN_MODEL",
-    default="deepseek:deepseek-v4-flash",
-    show_default=True,
-    help="Model for translation/review tasks",
-)
-@click.option(
-    "--translate-key",
-    envvar="AITRAN_API_KEY",
-    help="API key for the translation model",
-)
-@click.option(
-    "--translate-host",
-    envvar="AITRAN_API_HOST",
-    help="Custom API base URL for the translation model",
-)
-@click.option(
-    "--session-id",
-    help="Session ID to resume or name a new session",
-)
-@click.option(
-    "--resume",
-    is_flag=True,
-    help="Resume from a saved session",
-)
-@click.option(
-    "--auto-approve",
-    is_flag=True,
-    envvar="AITRAN_FLOW_AUTO_APPROVE",
-    help="Automatically approve tools that require confirmation.",
-)
-@_observability_options
-def flow(
-    prompt: str | None,
-    orchestrator_model: str | None,
-    orchestrator_key: str | None,
-    crowdin_token: str | None,
-    crowdin_org: str | None,
-    crowdin_url: str | None,
-    weblate_url: str | None,
-    weblate_token: str | None,
-    translate_model: str,
-    translate_key: str | None,
-    translate_host: str | None,
-    session_id: str | None,
-    resume: bool,
-    auto_approve: bool,
-    logfire: bool,
-    logfire_capture_http: bool,
-    mlflow: bool,
-    mlflow_tracking_uri: str | None,
-    mlflow_experiment: str | None,
-) -> None:
-    """Run an AI-orchestrated translation workflow.
-
-    Give a natural-language request and let the orchestrator inspect,
-    download, translate, review, and upload with approval at each step.
-    If PROMPT is omitted, starts the interactive REPL.
-    """
-    import asyncio
-
-    from rich.console import Console
-
-    from aitran.flow import run_flow
-    from aitran.toolsets._base import OrchestratorDeps
-
-    console = Console()
-
-    with _observability(
-        logfire=logfire,
-        logfire_capture_http=logfire_capture_http,
-        mlflow=mlflow,
-        mlflow_tracking_uri=mlflow_tracking_uri,
-        mlflow_experiment=mlflow_experiment,
-    ):
-        deps = OrchestratorDeps(
-            crowdin_token=crowdin_token,
-            crowdin_organization=crowdin_org,
-            crowdin_base_url=crowdin_url,
-            weblate_url=weblate_url,
-            weblate_token=weblate_token,
-            translate_model=translate_model,
-            translate_api_key=translate_key,
-            translate_api_host=translate_host,
-        )
-
-        asyncio.run(
-            run_flow(
-                prompt,
-                orchestrator_model=orchestrator_model,
-                orchestrator_api_key=orchestrator_key,
-                deps=deps,
-                session_id=session_id,
-                resume=resume,
-                auto_approve=auto_approve,
-                console=console,
-            )
-        )
