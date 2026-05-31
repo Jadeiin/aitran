@@ -52,6 +52,7 @@ _SLASH_COMMAND_HELP = {
     "/approve on": "Enable automatic approval for approval-gated tools.",
     "/approve off": "Disable automatic approval.",
     "/approve status": "Show whether automatic approval is enabled.",
+    "/new": "Start a new session (discard current conversation).",
     "/resume": "List saved sessions and restore one.",
     "/resume <id>": "Restore a specific session by ID.",
     "/exit": "Exit the app REPL.",
@@ -107,6 +108,12 @@ class _InteractiveTerminal:
         self.current_output = ""
         self.persisted_output = ""
         self._live_paused_for_prompt = False
+
+    def clear_screen(self) -> None:
+        """Clear the terminal and reset all output state."""
+        self.current_output = ""
+        self.persisted_output = ""
+        self.console.clear()
 
     async def approval(self, tool_name: str, args: dict) -> bool | str:
         """Prompt for tool approval without fighting live terminal rendering.
@@ -597,8 +604,16 @@ async def run_app_async(
             if next_prompt is None:
                 return final_output
 
-        # Handle /resume before sync slash commands (needs async I/O).
+        # Handle /resume and /new before sync slash commands (modify session state).
         cmd = next_prompt.strip()
+        if terminal is not None and cmd == "/new":
+            messages = []
+            sid = uuid.uuid4().hex[:12]
+            terminal.clear_screen()
+            terminal.console.print(f"[dim]New session {sid}.[/dim]")
+            next_prompt = None
+            continue
+
         if terminal is not None and (cmd == "/resume" or cmd.startswith("/resume ")):
             result = await terminal.handle_resume(next_prompt, deps.session_dir)
             if result is not None:
