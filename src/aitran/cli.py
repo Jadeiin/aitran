@@ -233,17 +233,16 @@ def _observability(
     "-m",
     "--model",
     "orchestrator_model",
-    envvar="AITRAN_FLOW_MODEL",
-    help=(
-        "Model for the orchestrator agent (provider:model format). "
-        "Defaults to anthropic:claude-sonnet-4-6."
-    ),
+    envvar="AITRAN_APP_MODEL",
+    default="deepseek:deepseek-v4-pro",
+    show_default=True,
+    help=("Model for the orchestrator agent (provider:model format)."),
 )
 @click.option(
     "-k",
     "--key",
     "orchestrator_key",
-    envvar="AITRAN_FLOW_KEY",
+    envvar="AITRAN_APP_KEY",
     help="API key for the orchestrator model",
 )
 @click.option(
@@ -308,7 +307,7 @@ def _observability(
 @click.option(
     "--auto-approve",
     is_flag=True,
-    envvar="AITRAN_FLOW_AUTO_APPROVE",
+    envvar="AITRAN_APP_AUTO_APPROVE",
     help="Automatically approve tools that require confirmation.",
 )
 @_observability_options
@@ -316,7 +315,7 @@ def _observability(
 def app(
     ctx: click.Context,
     prompt: str | None,
-    orchestrator_model: str | None,
+    orchestrator_model: str,
     orchestrator_key: str | None,
     crowdin_token: str | None,
     crowdin_org: str | None,

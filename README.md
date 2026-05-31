@@ -49,7 +49,7 @@ aitran -m openai:gpt-5.4-mini --prompt "translate Weblate component app/zh_Hans"
 ```
 
 The orchestrator agent uses a separate model (default
-`anthropic:claude-sonnet-4-6`) from the translation/review sub-tasks
+`deepseek:deepseek-v4-pro`) from the translation/review sub-tasks
 (default `deepseek:deepseek-v4-flash`), so you can pair a capable
 planner with a fast translator.
 
@@ -90,9 +90,9 @@ Models are specified in `<provider>:<model>` format:
 
 | Variable | Description |
 |---|---|
-| `AITRAN_FLOW_MODEL` | Orchestrator model for the top-level interactive app (default: `anthropic:claude-sonnet-4-6`) |
-| `AITRAN_FLOW_KEY` | API key for the orchestrator model |
-| `AITRAN_FLOW_AUTO_APPROVE` | Auto-approve tools in the interactive app (`1`, `true`, etc.) |
+| `AITRAN_APP_MODEL` | Orchestrator model for the top-level interactive app (default: `deepseek:deepseek-v4-pro`) |
+| `AITRAN_APP_KEY` | API key for the orchestrator model |
+| `AITRAN_APP_AUTO_APPROVE` | Auto-approve tools in the interactive app (`1`, `true`, etc.) |
 | `AITRAN_API_KEY` / `OPENAI_API_KEY` | API key |
 | `AITRAN_API_HOST` | Custom API base URL |
 | `AITRAN_MODEL` | Default model (default: `deepseek:deepseek-v4-flash`) |

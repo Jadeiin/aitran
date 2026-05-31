@@ -23,9 +23,9 @@ from pydantic_ai import (
 )
 from pydantic_ai.messages import ModelRequest, ModelResponse
 
+from aitran.agents._base import build_model
 from aitran.agents.orchestrator import (
     build_orchestrator_agent,
-    build_orchestrator_model,
 )
 from aitran.toolsets._base import OrchestratorDeps
 
@@ -519,7 +519,7 @@ def _build_deferred_handler(
 async def run_app_async(
     prompt: str | None,
     *,
-    orchestrator_model: str | None = None,
+    orchestrator_model: str,
     orchestrator_api_key: str | None = None,
     deps: OrchestratorDeps | None = None,
     session_id: str | None = None,
@@ -558,9 +558,10 @@ async def run_app_async(
     if terminal is not None:
         deps.tool_reporter = terminal.report_tool_result
 
-    model = build_orchestrator_model(
+    model = build_model(
         orchestrator_model,
         api_key=orchestrator_api_key,
+        temperature=0.1,
     )
 
     handler = _build_deferred_handler(on_approval)
@@ -732,7 +733,7 @@ def _extract_output(messages: list[ModelMessage]) -> str:
 def run_app(
     prompt: str | None,
     *,
-    orchestrator_model: str | None = None,
+    orchestrator_model: str,
     orchestrator_api_key: str | None = None,
     deps: OrchestratorDeps | None = None,
     session_id: str | None = None,

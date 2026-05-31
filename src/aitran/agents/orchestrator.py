@@ -15,7 +15,6 @@ from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, RunCon
 from pydantic_ai.capabilities import HandleDeferredToolCalls
 from translate.lang import data as lang_data
 
-from aitran.agents._base import build_model
 from aitran.toolsets._base import OrchestratorDeps
 
 if TYPE_CHECKING:
@@ -131,25 +130,3 @@ def build_orchestrator_agent(
         ],
         capabilities=capabilities,
     )
-
-
-def build_orchestrator_model(
-    model_spec: str | None = None,
-    *,
-    api_key: str | None = None,
-    base_url: str | None = None,
-) -> Model:
-    """Build the model for the orchestrator agent.
-
-    Falls back to a sensible default if no model spec is given.
-
-    Args:
-        model_spec: ``"provider:model"`` string, or None for default.
-        api_key: Optional API key override.
-        base_url: Optional base URL override.
-
-    Returns:
-        Configured model instance.
-    """
-    spec = model_spec or "anthropic:claude-sonnet-4-6"
-    return build_model(spec, api_key=api_key, base_url=base_url, temperature=0.1)

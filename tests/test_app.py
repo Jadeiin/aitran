@@ -78,7 +78,7 @@ async def test_run_app_continues_interactively(monkeypatch, tmp_path: Path):
         calls.append((prompt, list(messages)))
         return outputs.pop(0)
 
-    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_model", _fake_builder)
     monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
     monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
     monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
@@ -89,7 +89,12 @@ async def test_run_app_continues_interactively(monkeypatch, tmp_path: Path):
     console = DummyConsole(["继续执行", ""])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
 
-    result = await app.run_app_async("先看看状态", deps=deps, console=console)
+    result = await app.run_app_async(
+        "先看看状态",
+        orchestrator_model="deepseek:deepseek-v4-pro",
+        deps=deps,
+        console=console,
+    )
 
     assert result == DONE_TEXT
     assert [prompt for prompt, _ in calls] == ["先看看状态", "继续执行"]
@@ -110,7 +115,7 @@ async def test_run_app_stays_one_shot_without_tty(monkeypatch, tmp_path: Path):
         calls.append(prompt)
         return [_response(PLAN_TEXT)]
 
-    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_model", _fake_builder)
     monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
     monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
     monkeypatch.setattr(app.sys.stdin, "isatty", lambda: False)
@@ -118,7 +123,12 @@ async def test_run_app_stays_one_shot_without_tty(monkeypatch, tmp_path: Path):
     console = DummyConsole([])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
 
-    result = await app.run_app_async("先看看状态", deps=deps, console=console)
+    result = await app.run_app_async(
+        "先看看状态",
+        orchestrator_model="deepseek:deepseek-v4-pro",
+        deps=deps,
+        console=console,
+    )
 
     assert result == PLAN_TEXT
     assert calls == ["先看看状态"]
@@ -136,7 +146,7 @@ async def test_run_app_enters_repl_when_prompt_missing(monkeypatch, tmp_path: Pa
         calls.append(prompt)
         return [_response(DONE_TEXT)]
 
-    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_model", _fake_builder)
     monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
     monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
     monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
@@ -147,7 +157,12 @@ async def test_run_app_enters_repl_when_prompt_missing(monkeypatch, tmp_path: Pa
     console = DummyConsole(["翻译这个组件", ""])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
 
-    result = await app.run_app_async(None, deps=deps, console=console)
+    result = await app.run_app_async(
+        None,
+        orchestrator_model="deepseek:deepseek-v4-pro",
+        deps=deps,
+        console=console,
+    )
 
     assert result == DONE_TEXT
     assert calls == ["翻译这个组件"]
@@ -165,7 +180,7 @@ async def test_run_app_handles_approve_slash_command(monkeypatch, tmp_path: Path
         calls.append(prompt)
         return [_response(DONE_TEXT)]
 
-    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_model", _fake_builder)
     monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
     monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
     monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
@@ -176,7 +191,12 @@ async def test_run_app_handles_approve_slash_command(monkeypatch, tmp_path: Path
     console = DummyConsole(["/approve on", "翻译这个组件", ""])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
 
-    result = await app.run_app_async(None, deps=deps, console=console)
+    result = await app.run_app_async(
+        None,
+        orchestrator_model="deepseek:deepseek-v4-pro",
+        deps=deps,
+        console=console,
+    )
 
     assert result == DONE_TEXT
     assert calls == ["翻译这个组件"]
@@ -194,7 +214,7 @@ async def test_run_app_handles_exit_slash_command(monkeypatch, tmp_path: Path):
         calls.append(prompt)
         return [_response(DONE_TEXT)]
 
-    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_model", _fake_builder)
     monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
     monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
     monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
@@ -205,7 +225,12 @@ async def test_run_app_handles_exit_slash_command(monkeypatch, tmp_path: Path):
     console = DummyConsole(["/exit"])
     deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
 
-    result = await app.run_app_async(None, deps=deps, console=console)
+    result = await app.run_app_async(
+        None,
+        orchestrator_model="deepseek:deepseek-v4-pro",
+        deps=deps,
+        console=console,
+    )
 
     assert result == ""
     assert calls == []
@@ -384,7 +409,7 @@ async def test_run_app_handles_resume_by_id(monkeypatch, tmp_path: Path):
         calls.append(prompt)
         return outputs.pop(0)
 
-    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_model", _fake_builder)
     monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
     monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
     monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
@@ -403,7 +428,12 @@ async def test_run_app_handles_resume_by_id(monkeypatch, tmp_path: Path):
     console = DummyConsole(["/resume old123", "继续执行", ""])
     deps = OrchestratorDeps(session_dir=session_dir)
 
-    result = await app.run_app_async(None, deps=deps, console=console)
+    result = await app.run_app_async(
+        None,
+        orchestrator_model="deepseek:deepseek-v4-pro",
+        deps=deps,
+        console=console,
+    )
 
     assert result == DONE_TEXT
     assert calls == ["继续执行"]
@@ -425,7 +455,7 @@ async def test_run_app_handles_resume_selection(monkeypatch, tmp_path: Path):
         calls.append(prompt)
         return outputs.pop(0)
 
-    monkeypatch.setattr(app, "build_orchestrator_model", _fake_builder)
+    monkeypatch.setattr(app, "build_model", _fake_builder)
     monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
     monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
     monkeypatch.setattr(app.sys.stdin, "isatty", lambda: True)
@@ -444,7 +474,12 @@ async def test_run_app_handles_resume_selection(monkeypatch, tmp_path: Path):
     console = DummyConsole(["/resume", "1", "继续执行", ""])
     deps = OrchestratorDeps(session_dir=session_dir)
 
-    result = await app.run_app_async(None, deps=deps, console=console)
+    result = await app.run_app_async(
+        None,
+        orchestrator_model="deepseek:deepseek-v4-pro",
+        deps=deps,
+        console=console,
+    )
 
     assert result == DONE_TEXT
     assert calls == ["继续执行"]

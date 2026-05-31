@@ -157,8 +157,9 @@ def test_top_level_app_allows_missing_prompt(monkeypatch):
 
     assert result.exit_code == 0
     assert len(calls) == 1
-    prompt, _model, _key, session_id, resume, auto_approve = calls[0]
+    prompt, model, _key, session_id, resume, auto_approve = calls[0]
     assert prompt is None
+    assert model == "deepseek:deepseek-v4-pro"
     assert session_id is None
     assert resume is False
     assert auto_approve is False
@@ -209,3 +210,54 @@ def test_default_command_launches_app(monkeypatch):
 
     assert result.exit_code == 0
     assert calls == [("translate this", True)]
+
+
+def test_top_level_app_reads_app_envvars(monkeypatch):
+    calls = []
+
+    def disabled(**_kwargs) -> bool:
+        del _kwargs
+        return False
+
+    def noop(**_kwargs) -> None:
+        del _kwargs
+
+    def fake_run_app(
+        prompt,
+        *,
+        orchestrator_model,
+        orchestrator_api_key,
+        deps,
+        session_id,
+        resume,
+        auto_approve,
+        console,
+    ):
+        del deps, session_id, resume, console
+        calls.append((prompt, orchestrator_model, orchestrator_api_key, auto_approve))
+        return ""
+
+    monkeypatch.setattr(cli, "setup_logfire", disabled)
+    monkeypatch.setattr(cli, "flush_logfire", noop)
+    monkeypatch.setattr(cli, "setup_mlflow", disabled)
+    monkeypatch.setattr(cli, "flush_mlflow", noop)
+
+    import sys
+    import types
+
+    fake_module = types.ModuleType("aitran.app")
+    fake_module.run_app = fake_run_app
+    monkeypatch.setitem(sys.modules, "aitran.app", fake_module)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [],
+        env={
+            "AITRAN_APP_MODEL": "openai:gpt-5",
+            "AITRAN_APP_KEY": "secret",
+            "AITRAN_APP_AUTO_APPROVE": "1",
+        },
+    )
+
+    assert result.exit_code == 0
+    assert calls == [(None, "openai:gpt-5", "secret", True)]
