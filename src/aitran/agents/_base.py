@@ -194,6 +194,7 @@ def build_model(
                 temperature=temperature,
                 anthropic_cache_instructions=True,
                 anthropic_cache="5m",
+                anthropic_eager_input_streaming=True,
             ),
         )
 
