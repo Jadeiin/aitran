@@ -1,3 +1,29 @@
+## v0.4.0 (2026-05-31)
+
+### Feat
+
+- **flow**: add /resume slash command to restore saved sessions
+- **flow**: integrate prompt_toolkit for enhanced REPL UX
+- improve orchestrator flow repl
+- add orchestrator agent with streaming and platform toolsets
+- add full-width bracket support in AITranChecker and corresponding tests
+- add observability options for CLI commands and update flush method for MLflow
+
+### Fix
+
+- **flow**: address simplify review findings
+- **flow**: keep approval answers out of REPL history
+- use get_data() for wlc SDK objects and skip DeferredToolRequests display
+- include DeferredToolRequests in orchestrator agent output types
+- add skip count to review summary and update related tests
+- add summary tracking and save functionality in _run_review_async
+
+### Refactor
+
+- simplify bracket matching logic in _AITranChecker
+- rename review_chunk to review_batch and update related logic for batch processing
+- simplify v0.3.0 code with dedup, type safety, and QA optimization
+
 ## v0.3.0 (2026-05-28)
 
 ### Feat
