@@ -1,6 +1,6 @@
 [project]
 name = "aitran"
-version = "0.4.0"
+version = "0.4.1"
 description = "Agentic translation workflows for localization platforms, plus direct PO/XLIFF translation — streaming progress, deferred approval, and translator notes for human review"
 readme = "README.md"
 license = "GPL-2.0-or-later"

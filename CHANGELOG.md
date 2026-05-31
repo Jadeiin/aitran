@@ -1,3 +1,15 @@
+## v0.4.1 (2026-06-01)
+
+### Feat
+
+- add support for eager input streaming in model building
+- add support for custom API host and temperature in orchestrator settings
+- promote interactive app to top-level CLI
+
+### Refactor
+
+- move app model defaults to cli
+
 ## v0.4.0 (2026-05-31)
 
 ### Feat
