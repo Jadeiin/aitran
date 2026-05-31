@@ -1,7 +1,7 @@
 [project]
 name = "aitran"
 version = "0.3.0"
-description = "AI-powered translation for gettext PO and XLIFF files — streaming progress, fuzzy flagging, glossary support, and translator notes for human review"
+description = "Agentic translation workflows for localization platforms, plus direct PO/XLIFF translation — streaming progress, deferred approval, and translator notes for human review"
 readme = "README.md"
 license = "GPL-2.0-or-later"
 license-files = ["LICENSE"]

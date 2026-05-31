@@ -1,8 +1,9 @@
 # aitran
 
-AI-powered translation for gettext PO and XLIFF files — streaming
-progress, fuzzy flagging, glossary support, and translator notes for
-human review. Successor to [gpt-po](https://github.com/ryanhex53/gpt-po).
+Agentic translation workflows for localization platforms, plus direct
+PO/XLIFF translation — streaming progress, deferred approval, and
+translator notes for human review.
+Successor to [gpt-po](https://github.com/ryanhex53/gpt-po).
 
 Supports OpenAI, Anthropic, DeepSeek, and any OpenAI-compatible provider.
 
@@ -26,6 +27,37 @@ export ANTHROPIC_API_KEY=sk-...  # Anthropic
 ```
 
 ## Quick Start
+
+### Agentic workflows
+
+`aitran flow` launches an agent-driven interactive session. The agent
+inspects your project, proposes a plan, and executes each step
+(download, translate, review, upload) with your approval.
+
+```bash
+# Interactive REPL — multi-turn conversation with session persistence
+aitran flow
+
+# One-shot: give the agent a natural-language request
+aitran flow "translate Crowdin project MyApp to Chinese"
+
+# Resume a previous session
+aitran flow --resume --session-id abc123
+
+# Use a different orchestrator model
+aitran flow -m openai:gpt-5.4-mini "translate Weblate component app/zh_Hans"
+```
+
+The orchestrator agent uses a separate model (default
+`anthropic:claude-sonnet-4-6`) from the translation/review sub-tasks
+(default `deepseek:deepseek-v4-flash`), so you can pair a capable
+planner with a fast translator.
+
+Write operations (download, translate, review, upload) require explicit
+confirmation. Use `--auto-approve` or the `/approve on` REPL command to
+skip prompts.
+
+### Direct translation
 
 ```bash
 # Translate a PO file to its header language
@@ -58,12 +90,18 @@ Models are specified in `<provider>:<model>` format:
 
 | Variable | Description |
 |---|---|
+| `AITRAN_FLOW_MODEL` | Orchestrator model for `flow` (default: `anthropic:claude-sonnet-4-6`) |
+| `AITRAN_FLOW_KEY` | API key for the orchestrator model |
+| `AITRAN_FLOW_AUTO_APPROVE` | Auto-approve tools in `flow` (`1`, `true`, etc.) |
 | `AITRAN_API_KEY` / `OPENAI_API_KEY` | API key |
 | `AITRAN_API_HOST` | Custom API base URL |
 | `AITRAN_MODEL` | Default model (default: `deepseek:deepseek-v4-flash`) |
 | `AITRAN_MODEL_TMP` | LLM temperature (default: `0.1`) |
 | `AITRAN_LOGFIRE` | Enable Pydantic Logfire tracing (`1`, `true`, etc.) |
 | `AITRAN_LOGFIRE_CAPTURE_HTTP` | Capture provider HTTP headers and bodies in Logfire |
+| `AITRAN_MLFLOW` | Enable MLflow tracing (`1`, `true`, etc.) |
+| `AITRAN_MLFLOW_TRACKING_URI` | MLflow tracking server URI |
+| `AITRAN_MLFLOW_EXPERIMENT` | MLflow experiment name |
 | `AITRAN_WEBLATE_URL` | Weblate base URL (e.g. `https://weblate.example.org`) |
 | `AITRAN_WEBLATE_TOKEN` | Weblate API token |
 | `AITRAN_CROWDIN_TOKEN` | Crowdin API token |
@@ -72,47 +110,73 @@ Models are specified in `<provider>:<model>` format:
 
 ## CLI Reference
 
+### flow
+
+```
+aitran flow [PROMPT] [options]
+```
+
+Agentic translation workflow. The agent inspects, downloads, translates,
+reviews, and uploads translations on supported localization platforms
+with your approval at each write step. If `PROMPT` is omitted, starts
+an interactive REPL with persistent history and session management.
+
+**REPL commands:** `/help`, `/approve on|off|status`, `/resume [id]`, `/exit`
+
+Use `aitran flow --help` for the full list of options.
+
 ### translate
 
 ```
 aitran translate [options]
 ```
 
-| Option | Description |
-|---|---|
-| `-m, --model` | Model in `<provider>:<model>` format |
-| `-k, --key` | API key |
-| `--host` | Custom API base URL |
-| `-t, --temperature` | LLM temperature (default: 0.1) |
-| `--po` | PO file path |
-| `--po-dir` | Directory of .po files |
-| `--xliff` | XLIFF file path |
-| `--xliff-dir` | Directory of .xliff/.xlf files |
-| `--jobs` | Max files to translate concurrently for directory inputs (default: 4) |
-| `-src, --source` | Source language (default: en) |
-| `-l, --lang` | Target language (ISO 639-1) |
-| `-v, --verbose` | Print each translation as it completes |
-| `-o, --output` | Output file path |
-| `--context` | Text file with additional translation context |
-| `--context-length` | Max accumulated source length per batch (default: 4096) |
-| `--order` | Unit ordering: `file` (default), `source`, `reference`, `context` |
-| `--profile` | Prompt detail: `full` (default, all metadata) or `fast` (index+source only) |
-| `--logfire` | Enable Pydantic Logfire tracing for agent/model runs |
-| `--logfire-capture-http` | Capture provider HTTP headers and bodies in Logfire |
+Translate PO or XLIFF files directly without platform integration.
 
-### Logfire observability
+```bash
+# Translate a PO file to its header language
+aitran translate --po zh_Hans.po
 
-`aitran translate --logfire ...` enables Pydantic Logfire instrumentation for
-Pydantic AI agent/model runs. Set up Logfire first:
+# Translate with a specific model and target language
+aitran translate --po zh_Hans.po -l zh -m anthropic:claude-haiku-4-5
+
+# Translate all PO files in a directory
+aitran translate --po-dir ./locales -l zh
+
+# Translate an XLIFF file
+aitran translate --xliff en_zh-CN.xliff -src en -l zh
+
+# Verbose mode — see each translation as it completes
+aitran translate --po zh_Hans.po -v
+
+# Custom API host (for OpenAI-compatible gateways)
+aitran translate --po zh_Hans.po --host https://your-gateway.example.com
+```
+
+Use `aitran translate --help` for the full list of options.
+
+### Observability
+
+Both `translate` and `flow` support distributed tracing via Logfire and
+MLflow.
+
+**Logfire:**
 
 ```bash
 uv run logfire auth
 uv run logfire projects use  # or: uv run logfire projects new
+aitran translate --logfire --po zh_Hans.po
 ```
 
-Use `--logfire-capture-http` only when you need raw provider requests and
-responses in the trace. It may capture prompts, completions, headers, and API
-credentials, depending on provider/client behavior.
+Use `--logfire-capture-http` only when you need raw provider requests
+and responses in the trace. It may capture prompts, completions,
+headers, and API credentials.
+
+**MLflow:**
+
+```bash
+aitran translate --mlflow --mlflow-experiment my-project --po zh_Hans.po
+```
 
 ### sync
 
@@ -122,29 +186,17 @@ aitran sync --po <file> --pot <file>
 
 Update PO file from POT template, preserving existing translations.
 
-### weblate
+### Platform CLIs
 
-```
+Inspect, download, or upload translation files on supported platforms:
+
+```bash
 aitran weblate ls [<project[/component[/lang]]>]
-aitran weblate stats <project[/component[/lang]]>
-aitran weblate download --url <url> --token <token> --object <project/component/lang> -o <file> [--format <format>] [--untranslated-only]
-aitran weblate upload --url <url> --token <token> --object <project/component/lang> --file <file> [--method <method>] [--fuzzy <mode>]
-```
-
-Inspect, download, or upload Weblate translation files for the specified project/component.
-
-### crowdin
-
-```
 aitran crowdin projects --token <token>
-aitran crowdin files --token <token> (--project-id <id> | --project <name>)
-aitran crowdin languages --token <token> [--project-id <id> | --project <name>]
-aitran crowdin progress --token <token> (--project-id <id> | --project <name>) [--file-id <id>] [-l <lang>]
-aitran crowdin download --token <token> (--project-id <id> | --project <name>) [--file-id <id>] -l <lang> -o <file.xliff>
-aitran crowdin upload --token <token> --project-id <id> --file-id <id> -l <lang> --file <file>
 ```
 
-Inspect, download, or upload Crowdin translation files for the specified project file ID. Crowdin download infers XLIFF export format from the `.xliff`/`.xlf` output path.
+Use `aitran weblate --help` or `aitran crowdin --help` for the full
+command reference.
 
 ### remove
 
@@ -181,6 +233,9 @@ Example `dictionary-zh.json`:
 
 ## Features
 
+- **Agentic workflows** — agent-driven translation pipelines with plan-approve-execute pattern
+- **Deferred approval** — write operations require explicit confirmation before executing
+- **Interactive REPL** — multi-turn conversation with persistent history, auto-suggest, and session management
 - **Streaming progress** — translations appear in real time with fuzzy flags
 - **Structured output** — Pydantic AI validates completeness, retries on format errors
 - **HTML preservation** — XML-escaping from the input format is automatically reversed
