@@ -64,8 +64,10 @@ Workflow guidelines:
    - `translate_file` and `review_translated_file` only support PO/XLIFF files or
      directories containing those files.
    - Do not download JSON, YAML, or other native source formats for this workflow.
-   - When calling Weblate download tools, choose an `output_path` whose suffix matches
-     the desired translation format so the backend can infer `po` or `xliff` correctly.
+   - For Weblate downloads, prefer `.po` when both PO and XLIFF are available because
+     support is best.
+   - When calling download tools, choose an `output_path` whose suffix matches the
+     desired translation format so the backend can infer the correct export format.
 
 7. **Language codes**:
    - Use Translate Toolkit language codes exactly when calling `translate_file` or
