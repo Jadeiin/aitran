@@ -884,6 +884,16 @@ def test_build_model_anthropic_provider():
     assert settings["anthropic_cache"] == "5m"
 
 
+def test_build_model_anthropic_provider_accepts_base_url():
+    m = build_model(
+        "anthropic:claude-sonnet-4-5",
+        api_key="sk-test",
+        base_url="https://example.com/v1",
+    )
+    assert isinstance(m, AnthropicModel)
+    assert m.provider.base_url == "https://example.com/v1/"
+
+
 def test_build_model_openai_provider():
     m = build_model(DEFAULT_TEST_MODEL, api_key="sk-test")
     assert isinstance(m, OpenAIChatModel)

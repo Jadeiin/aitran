@@ -66,6 +66,52 @@ def _fake_builder(*_args, **_kwargs) -> object:
     return object()
 
 
+async def test_run_app_passes_orchestrator_host_and_temperature(
+    monkeypatch, tmp_path: Path
+):
+    build_calls: list[dict] = []
+
+    def fake_build_model(model_spec: str, **kwargs):
+        build_calls.append({"model_spec": model_spec, **kwargs})
+        return object()
+
+    monkeypatch.setattr(app, "build_model", fake_build_model)
+    monkeypatch.setattr(app, "build_orchestrator_agent", _fake_builder)
+
+    async def fake_run_streaming(
+        agent, prompt, messages, deps, console, *, terminal=None
+    ):
+        del agent, prompt, messages, deps, console, terminal
+        await _tick()
+        return [_response(DONE_TEXT)]
+
+    monkeypatch.setattr(app, "_run_streaming", fake_run_streaming)
+    monkeypatch.setattr(app.sys.stdin, "isatty", lambda: False)
+
+    console = DummyConsole([])
+    deps = OrchestratorDeps(session_dir=tmp_path / "sessions")
+
+    result = await app.run_app_async(
+        "先看看状态",
+        orchestrator_model="openai:gpt-5",
+        orchestrator_api_key="secret",
+        orchestrator_api_host="https://example.com/api",
+        orchestrator_temperature=0.6,
+        deps=deps,
+        console=console,
+    )
+
+    assert result == DONE_TEXT
+    assert build_calls == [
+        {
+            "model_spec": "openai:gpt-5",
+            "api_key": "secret",
+            "base_url": "https://example.com/api/v1",
+            "temperature": 0.6,
+        }
+    ]
+
+
 async def test_run_app_continues_interactively(monkeypatch, tmp_path: Path):
     calls: list[tuple[str, list[ModelResponse]]] = []
     outputs = [[_response(PLAN_TEXT)], [_response(DONE_TEXT)]]

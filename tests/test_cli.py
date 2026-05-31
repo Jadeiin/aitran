@@ -1,5 +1,6 @@
 """Tests for the Click CLI wiring."""
 
+import pytest
 from click.testing import CliRunner
 
 from aitran import cli
@@ -124,6 +125,8 @@ def test_top_level_app_allows_missing_prompt(monkeypatch):
         *,
         orchestrator_model,
         orchestrator_api_key,
+        orchestrator_api_host,
+        orchestrator_temperature,
         deps,
         session_id,
         resume,
@@ -135,6 +138,8 @@ def test_top_level_app_allows_missing_prompt(monkeypatch):
             prompt,
             orchestrator_model,
             orchestrator_api_key,
+            orchestrator_api_host,
+            orchestrator_temperature,
             session_id,
             resume,
             auto_approve,
@@ -157,9 +162,11 @@ def test_top_level_app_allows_missing_prompt(monkeypatch):
 
     assert result.exit_code == 0
     assert len(calls) == 1
-    prompt, model, _key, session_id, resume, auto_approve = calls[0]
+    prompt, model, _key, host, temperature, session_id, resume, auto_approve = calls[0]
     assert prompt is None
     assert model == "deepseek:deepseek-v4-pro"
+    assert host is None
+    assert temperature == pytest.approx(0.5)
     assert session_id is None
     assert resume is False
     assert auto_approve is False
@@ -180,13 +187,24 @@ def test_default_command_launches_app(monkeypatch):
         *,
         orchestrator_model,
         orchestrator_api_key,
+        orchestrator_api_host,
+        orchestrator_temperature,
         deps,
         session_id,
         resume,
         auto_approve,
         console,
     ):
-        del orchestrator_model, orchestrator_api_key, deps, session_id, resume, console
+        del (
+            orchestrator_model,
+            orchestrator_api_key,
+            orchestrator_api_host,
+            orchestrator_temperature,
+            deps,
+            session_id,
+            resume,
+            console,
+        )
         calls.append((prompt, auto_approve))
         return ""
 
@@ -227,6 +245,8 @@ def test_top_level_app_reads_app_envvars(monkeypatch):
         *,
         orchestrator_model,
         orchestrator_api_key,
+        orchestrator_api_host,
+        orchestrator_temperature,
         deps,
         session_id,
         resume,
@@ -234,7 +254,14 @@ def test_top_level_app_reads_app_envvars(monkeypatch):
         console,
     ):
         del deps, session_id, resume, console
-        calls.append((prompt, orchestrator_model, orchestrator_api_key, auto_approve))
+        calls.append((
+            prompt,
+            orchestrator_model,
+            orchestrator_api_key,
+            orchestrator_api_host,
+            orchestrator_temperature,
+            auto_approve,
+        ))
         return ""
 
     monkeypatch.setattr(cli, "setup_logfire", disabled)
@@ -255,9 +282,13 @@ def test_top_level_app_reads_app_envvars(monkeypatch):
         env={
             "AITRAN_APP_MODEL": "openai:gpt-5",
             "AITRAN_APP_KEY": "secret",
+            "AITRAN_APP_HOST": "https://example.com/api",
+            "AITRAN_APP_TMP": "0.4",
             "AITRAN_APP_AUTO_APPROVE": "1",
         },
     )
 
     assert result.exit_code == 0
-    assert calls == [(None, "openai:gpt-5", "secret", True)]
+    assert calls == [
+        (None, "openai:gpt-5", "secret", "https://example.com/api", 0.4, True)
+    ]

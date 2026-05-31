@@ -182,6 +182,8 @@ def build_model(
         anthropic_kwargs = {"http_client": build_retrying_http_client()}
         if api_key is not None:
             anthropic_kwargs["api_key"] = api_key
+        if base_url is not None:
+            anthropic_kwargs["base_url"] = base_url
         anthropic_provider = AnthropicProvider(
             **anthropic_kwargs,
         )

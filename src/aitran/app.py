@@ -23,7 +23,7 @@ from pydantic_ai import (
 )
 from pydantic_ai.messages import ModelRequest, ModelResponse
 
-from aitran.agents._base import build_model
+from aitran.agents._base import build_model, fmt_base_url
 from aitran.agents.orchestrator import (
     build_orchestrator_agent,
 )
@@ -521,6 +521,8 @@ async def run_app_async(
     *,
     orchestrator_model: str,
     orchestrator_api_key: str | None = None,
+    orchestrator_api_host: str | None = None,
+    orchestrator_temperature: float = 0.5,
     deps: OrchestratorDeps | None = None,
     session_id: str | None = None,
     resume: bool = False,
@@ -534,6 +536,8 @@ async def run_app_async(
         prompt: Optional initial natural-language request.
         orchestrator_model: Model spec for the orchestrator agent.
         orchestrator_api_key: API key for the orchestrator model.
+        orchestrator_api_host: Custom API base URL for the orchestrator model.
+        orchestrator_temperature: LLM temperature for the orchestrator model.
         deps: Orchestrator dependencies.
         session_id: Session ID to resume.
         resume: Whether to resume from a saved session.
@@ -561,7 +565,8 @@ async def run_app_async(
     model = build_model(
         orchestrator_model,
         api_key=orchestrator_api_key,
-        temperature=0.1,
+        base_url=fmt_base_url(orchestrator_api_host),
+        temperature=orchestrator_temperature,
     )
 
     handler = _build_deferred_handler(on_approval)
@@ -735,6 +740,8 @@ def run_app(
     *,
     orchestrator_model: str,
     orchestrator_api_key: str | None = None,
+    orchestrator_api_host: str | None = None,
+    orchestrator_temperature: float = 0.5,
     deps: OrchestratorDeps | None = None,
     session_id: str | None = None,
     resume: bool = False,
@@ -752,6 +759,8 @@ def run_app(
             prompt,
             orchestrator_model=orchestrator_model,
             orchestrator_api_key=orchestrator_api_key,
+            orchestrator_api_host=orchestrator_api_host,
+            orchestrator_temperature=orchestrator_temperature,
             deps=deps,
             session_id=session_id,
             resume=resume,

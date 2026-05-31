@@ -65,7 +65,7 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 - Top-level entry: `aitran`
 - One-shot prompt: `aitran --prompt "..."`
 - Resume: `aitran --resume --session-id <id>`
-- Environment for the app entry uses `AITRAN_APP_*` orchestrator settings (`AITRAN_APP_MODEL`, `AITRAN_APP_KEY`, `AITRAN_APP_AUTO_APPROVE`)
+- Environment for the app entry uses `AITRAN_APP_*` orchestrator settings (`AITRAN_APP_MODEL`, `AITRAN_APP_KEY`, `AITRAN_APP_HOST`, `AITRAN_APP_TMP`, `AITRAN_APP_AUTO_APPROVE`)
 
 ## Conventions & Gotchas
 

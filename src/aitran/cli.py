@@ -246,6 +246,21 @@ def _observability(
     help="API key for the orchestrator model",
 )
 @click.option(
+    "--host",
+    "orchestrator_host",
+    envvar="AITRAN_APP_HOST",
+    help="Custom API base URL for the orchestrator model",
+)
+@click.option(
+    "--temperature",
+    "orchestrator_temperature",
+    envvar="AITRAN_APP_TMP",
+    type=float,
+    default=0.5,
+    show_default=True,
+    help="LLM temperature for the orchestrator model.",
+)
+@click.option(
     "--crowdin-token",
     envvar="AITRAN_CROWDIN_TOKEN",
     help="Crowdin API token",
@@ -317,6 +332,8 @@ def app(
     prompt: str | None,
     orchestrator_model: str,
     orchestrator_key: str | None,
+    orchestrator_host: str | None,
+    orchestrator_temperature: float,
     crowdin_token: str | None,
     crowdin_org: str | None,
     crowdin_url: str | None,
@@ -373,6 +390,8 @@ def app(
             prompt,
             orchestrator_model=orchestrator_model,
             orchestrator_api_key=orchestrator_key,
+            orchestrator_api_host=orchestrator_host,
+            orchestrator_temperature=orchestrator_temperature,
             deps=deps,
             session_id=session_id,
             resume=resume,

@@ -92,6 +92,8 @@ Models are specified in `<provider>:<model>` format:
 |---|---|
 | `AITRAN_APP_MODEL` | Orchestrator model for the top-level interactive app (default: `deepseek:deepseek-v4-pro`) |
 | `AITRAN_APP_KEY` | API key for the orchestrator model |
+| `AITRAN_APP_HOST` | Custom API base URL for the orchestrator model |
+| `AITRAN_APP_TMP` | Orchestrator LLM temperature (default: `0.5`) |
 | `AITRAN_APP_AUTO_APPROVE` | Auto-approve tools in the interactive app (`1`, `true`, etc.) |
 | `AITRAN_API_KEY` / `OPENAI_API_KEY` | API key |
 | `AITRAN_API_HOST` | Custom API base URL |
