@@ -19,7 +19,6 @@ from pydantic_ai.capabilities import (
     Toolset,
 )
 from pydantic_ai_backends import ConsoleCapability
-from pydantic_ai_backends.permissions import DEFAULT_RULESET
 from pydantic_ai_toolguard import PermissionRule, ToolGuard
 from translate.lang import data as lang_data
 
@@ -168,14 +167,21 @@ def build_orchestrator_agent(
             # Read-only tools — allow without approval
             PermissionRule(tool_pattern="crowdin_*", action="allow"),
             PermissionRule(tool_pattern="weblate_*", action="allow"),
-            # Console/file tools — ToolGuard allows them through;
-            # ConsoleCapability enforces per-path permissions (secrets deny, write/edit ask)
+            # Console/file tools — read-only allow, write/edit need approval
             PermissionRule(tool_pattern="read_file", action="allow"),
-            PermissionRule(tool_pattern="write_file", action="allow"),
-            PermissionRule(tool_pattern="edit_file", action="allow"),
             PermissionRule(tool_pattern="ls", action="allow"),
             PermissionRule(tool_pattern="glob", action="allow"),
             PermissionRule(tool_pattern="grep", action="allow"),
+            PermissionRule(
+                tool_pattern="write_file",
+                action="allow",
+                requires_approval=True,
+            ),
+            PermissionRule(
+                tool_pattern="edit_file",
+                action="allow",
+                requires_approval=True,
+            ),
             # No wildcard deny rule needed — ToolGuard's default is deny.
         ],
     )
@@ -187,7 +193,7 @@ def build_orchestrator_agent(
         Toolset(translate_toolset),
         *(extra_capabilities or []),
         guard,
-        ConsoleCapability(permissions=DEFAULT_RULESET, include_execute=False),
+        ConsoleCapability(include_execute=False),
         reporting_hooks,  # type: ignore[arg-type]
     ]
     if deferred_handler is not None:
