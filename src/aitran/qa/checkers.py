@@ -2,13 +2,39 @@
 
 from __future__ import annotations
 
+import os
+
+import autocorrect_py as ac
 from translate.filters.checks import (
     CheckerConfig,
+    FilterFailure,
     StandardChecker,
     StandardUnitChecker,
     TeeChecker,
 )
-from translate.filters.decorators import cosmetic
+from translate.filters.decorators import cosmetic, functional
+
+from aitran.utils import _git_root
+
+_autocorrect_config_loaded = False
+
+
+def _load_autocorrect_config() -> None:
+    """Load .autocorrectrc from CWD or git root (once)."""
+    global _autocorrect_config_loaded
+    if _autocorrect_config_loaded:
+        return
+    _autocorrect_config_loaded = True
+
+    for directory in (os.getcwd(), _git_root()):
+        if directory is None:
+            continue
+        path = os.path.join(directory, ".autocorrectrc")
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                ac.load_config(f.read())
+            return
+
 
 # Noisy or niche checkers excluded by default.  Everything else from
 # StandardChecker + StandardUnitChecker is enabled — the LLM reviewer
@@ -23,8 +49,50 @@ DEFAULT_EXCLUDE: set[str] = {
 }
 
 
+def _run_autocorrect(text: str, *, severity: ac.Severity) -> bool:
+    """Run autocorrect lint and raise FilterFailure for matching severity.
+
+    Args:
+        text: Target text to lint.
+        severity: autocorrect severity to match.
+
+    Returns:
+        True if no findings at this severity.
+
+    Raises:
+        FilterFailure: If autocorrect finds issues at *severity*.
+    """
+    _load_autocorrect_config()
+
+    result = ac.lint_for(text, "txt")
+    messages = [
+        f'"{lr.old}" → "{lr.new}"' for lr in result.lines if lr.severity == severity
+    ]
+    if messages:
+        raise FilterFailure(messages)
+    return True
+
+
 class _AITranChecker(StandardChecker):
     """Extended checker that treats full-width brackets as equivalents."""
+
+    @functional
+    def autocorrect_error(self, str1: str, str2: str) -> bool:  # noqa: ARG002
+        """Check CJK half-width/full-width spacing (error-level).
+
+        Returns:
+            True if no error-level findings.
+        """
+        return _run_autocorrect(str2, severity=ac.Severity.Error)
+
+    @cosmetic
+    def autocorrect_warning(self, str1: str, str2: str) -> bool:  # noqa: ARG002
+        """Check CJK half-width/full-width spacing (warning-level).
+
+        Returns:
+            True if no warning-level findings.
+        """
+        return _run_autocorrect(str2, severity=ac.Severity.Warning)
 
     @cosmetic
     def brackets(self, str1, str2) -> bool:
@@ -81,8 +149,6 @@ class _AITranChecker(StandardChecker):
         if extra:
             messages.append(f"Added {', '.join(extra)}")
         if messages:
-            from translate.filters.checks import FilterFailure
-
             raise FilterFailure(messages)
 
         return True

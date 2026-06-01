@@ -48,6 +48,7 @@ dependencies = [
     "prompt-toolkit>=3.0",
     "wlc>=2.0.0",
     "crowdin-api-client>=1.26.0",
+    "autocorrect-py>=2.14.0",
 ]
 
 [project.optional-dependencies]
