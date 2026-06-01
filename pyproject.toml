@@ -49,6 +49,8 @@ dependencies = [
     "wlc>=2.0.0",
     "crowdin-api-client>=1.26.0",
     "autocorrect-py>=2.14.0",
+    "pydantic-ai-backend[console]>=0.2.9",
+    "pydantic-ai-toolguard>=0.1.0",
 ]
 
 [project.optional-dependencies]

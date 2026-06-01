@@ -12,11 +12,7 @@ from pydantic_ai import RunContext  # noqa: TC002
 from pydantic_ai.toolsets import FunctionToolset
 
 from aitran.review import review_file
-from aitran.toolsets._base import (
-    OrchestratorDeps,
-    error_message,
-    report_tool_outcome,
-)
+from aitran.toolsets._base import OrchestratorDeps  # noqa: TC001
 from aitran.translate import (
     translate_po,
     translate_po_dir,
@@ -84,7 +80,7 @@ def _detect_format(path: str) -> str:
     raise ValueError(f"Unsupported file format: {ext}")
 
 
-@translate_toolset.tool(requires_approval=True)
+@translate_toolset.tool
 async def translate_file(  # noqa: D417
     ctx: RunContext[OrchestratorDeps],
     path: str,
@@ -118,109 +114,89 @@ async def translate_file(  # noqa: D417
     Returns:
         Confirmation message with file count.
     """
-    try:
-        fmt = _detect_format(path)
-        model = ctx.deps.translate_model
-        kwargs = _translate_kwargs(ctx.deps)
-        resolved_output = output_path or path
+    fmt = _detect_format(path)
+    model = ctx.deps.translate_model
+    kwargs = _translate_kwargs(ctx.deps)
+    resolved_output = output_path or path
 
-        # translate_po/review_file use asyncio.run() internally,
-        # so they must run in a thread to avoid nested event loop errors.
-        if fmt == "po":
-            await asyncio.to_thread(
-                translate_po,
-                model=model,
-                po_path=path,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                verbose=False,
-                output_path=resolved_output,
-                context_file=context_file,
-                batch_size=batch_size,
-                progress=_SILENT_PROGRESS,
-                order=order,
-                profile=profile,
-                **kwargs,
-            )
-            message = f"Translated PO file: {path}"
-            report_tool_outcome(
-                ctx.deps, tool_name="translate_file", message=message, ok=True
-            )
-            return message
-
-        if fmt == "xliff":
-            await asyncio.to_thread(
-                translate_xliff_file,
-                model=model,
-                xliff_path=path,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                verbose=False,
-                output_path=resolved_output,
-                context_file=context_file,
-                batch_size=batch_size,
-                progress=_SILENT_PROGRESS,
-                profile=profile,
-                order=order,
-                **kwargs,
-            )
-            message = f"Translated XLIFF file: {path}"
-            report_tool_outcome(
-                ctx.deps, tool_name="translate_file", message=message, ok=True
-            )
-            return message
-
-        # Directory
-        po_files = [f for f in os.listdir(path) if f.endswith(".po")]
-        xliff_files = [f for f in os.listdir(path) if f.endswith((".xliff", ".xlf"))]
-        if po_files:
-            await asyncio.to_thread(
-                translate_po_dir,
-                model=model,
-                dir_path=path,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                verbose=False,
-                context_file=context_file,
-                batch_size=batch_size,
-                jobs=jobs,
-                progress=_SILENT_PROGRESS,
-                order=order,
-                profile=profile,
-                **kwargs,
-            )
-        if xliff_files:
-            await asyncio.to_thread(
-                translate_xliff_dir,
-                model=model,
-                dir_path=path,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                verbose=False,
-                context_file=context_file,
-                batch_size=batch_size,
-                jobs=jobs,
-                progress=_SILENT_PROGRESS,
-                profile=profile,
-                order=order,
-                **kwargs,
-            )
-        total = len(po_files) + len(xliff_files)
-        message = f"Translated {total} file(s) in {path}"
-        report_tool_outcome(
-            ctx.deps, tool_name="translate_file", message=message, ok=True
+    # translate_po/review_file use asyncio.run() internally,
+    # so they must run in a thread to avoid nested event loop errors.
+    if fmt == "po":
+        await asyncio.to_thread(
+            translate_po,
+            model=model,
+            po_path=path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            verbose=False,
+            output_path=resolved_output,
+            context_file=context_file,
+            batch_size=batch_size,
+            progress=_SILENT_PROGRESS,
+            order=order,
+            profile=profile,
+            **kwargs,
         )
-        return message
+        return f"Translated PO file: {path}"
 
-    except Exception as e:  # noqa: BLE001
-        message = error_message("Translate", e)
-        report_tool_outcome(
-            ctx.deps, tool_name="translate_file", message=message, ok=False
+    if fmt == "xliff":
+        await asyncio.to_thread(
+            translate_xliff_file,
+            model=model,
+            xliff_path=path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            verbose=False,
+            output_path=resolved_output,
+            context_file=context_file,
+            batch_size=batch_size,
+            progress=_SILENT_PROGRESS,
+            profile=profile,
+            order=order,
+            **kwargs,
         )
-        return message
+        return f"Translated XLIFF file: {path}"
+
+    # Directory
+    po_files = [f for f in os.listdir(path) if f.endswith(".po")]
+    xliff_files = [f for f in os.listdir(path) if f.endswith((".xliff", ".xlf"))]
+    if po_files:
+        await asyncio.to_thread(
+            translate_po_dir,
+            model=model,
+            dir_path=path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            verbose=False,
+            context_file=context_file,
+            batch_size=batch_size,
+            jobs=jobs,
+            progress=_SILENT_PROGRESS,
+            order=order,
+            profile=profile,
+            **kwargs,
+        )
+    if xliff_files:
+        await asyncio.to_thread(
+            translate_xliff_dir,
+            model=model,
+            dir_path=path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            verbose=False,
+            context_file=context_file,
+            batch_size=batch_size,
+            jobs=jobs,
+            progress=_SILENT_PROGRESS,
+            profile=profile,
+            order=order,
+            **kwargs,
+        )
+    total = len(po_files) + len(xliff_files)
+    return f"Translated {total} file(s) in {path}"
 
 
-@translate_toolset.tool(requires_approval=True)
+@translate_toolset.tool
 async def review_translated_file(  # noqa: D417
     ctx: RunContext[OrchestratorDeps],
     path: str,
@@ -250,31 +226,20 @@ async def review_translated_file(  # noqa: D417
     Returns:
         JSON string of review summary.
     """
-    try:
-        model = ctx.deps.translate_model
-        kwargs = _translate_kwargs(ctx.deps)
+    model = ctx.deps.translate_model
+    kwargs = _translate_kwargs(ctx.deps)
 
-        summary = await asyncio.to_thread(
-            review_file,
-            model=model,
-            path=path,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            output_path=output_path or path,
-            batch_size=batch_size,
-            strict=strict,
-            auto_fix=auto_fix,
-            progress=_SILENT_PROGRESS,
-            **kwargs,
-        )
-        message = json.dumps(summary, indent=2)
-        report_tool_outcome(
-            ctx.deps, tool_name="review_translated_file", message=message, ok=True
-        )
-        return message
-    except Exception as e:  # noqa: BLE001
-        message = error_message("Review", e)
-        report_tool_outcome(
-            ctx.deps, tool_name="review_translated_file", message=message, ok=False
-        )
-        return message
+    summary = await asyncio.to_thread(
+        review_file,
+        model=model,
+        path=path,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        output_path=output_path or path,
+        batch_size=batch_size,
+        strict=strict,
+        auto_fix=auto_fix,
+        progress=_SILENT_PROGRESS,
+        **kwargs,
+    )
+    return json.dumps(summary, indent=2)

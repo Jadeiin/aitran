@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-ToolReporter = Callable[[str, str, bool], None]
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from pydantic_ai_backends import LocalBackend
 
 
 @dataclass
@@ -34,11 +37,14 @@ class OrchestratorDeps:
     translate_api_host: str | None = None
     translate_temperature: float = 0.1
 
+    # File management backend
+    backend: LocalBackend | None = None
+
     # Session persistence
     session_dir: Path = field(default_factory=lambda: Path(".aitran/sessions"))
 
-    # Optional terminal reporter for approved tool completion.
-    tool_reporter: ToolReporter | None = None
+    # Terminal reporter for tool outcome display (used by _reporting hooks).
+    tool_reporter: Callable[[str, str, bool], None] | None = None
 
 
 def summarize_list(items: list[dict], *, label: str, name_field: str = "name") -> str:
@@ -55,7 +61,6 @@ def summarize_list(items: list[dict], *, label: str, name_field: str = "name") -
         name = item.get(name_field) or item.get("name") or item.get("path")
         if name:
             entry[name_field] = name
-        # Include a few commonly useful fields
         for key in ("status", "approval", "translated", "phrases"):
             if key in item:
                 entry[key] = item[key]
@@ -92,24 +97,3 @@ def summarize_progress(items: list[dict]) -> str:
                 entry[key] = data[key]
         summary.append(entry)
     return json.dumps(summary, ensure_ascii=False, indent=2)
-
-
-def error_message(operation: str, error: Exception) -> str:
-    """Format an error as a concise message for the LLM.
-
-    Returns:
-        Error summary string.
-    """
-    return f"{operation} failed: {type(error).__name__}: {error}"
-
-
-def report_tool_outcome(
-    deps: OrchestratorDeps,
-    *,
-    tool_name: str,
-    message: str,
-    ok: bool,
-) -> None:
-    """Emit an immediate tool completion update when a reporter is configured."""
-    if deps.tool_reporter is not None:
-        deps.tool_reporter(tool_name, message, ok)

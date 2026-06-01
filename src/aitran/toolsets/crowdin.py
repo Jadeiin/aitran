@@ -25,8 +25,6 @@ from aitran.crowdin import (
 )
 from aitran.toolsets._base import (
     OrchestratorDeps,
-    error_message,
-    report_tool_outcome,
     summarize_list,
     summarize_progress,
 )
@@ -51,13 +49,6 @@ def _project_kwargs(project: str) -> dict:
     return {"project_id": None, "project": project}
 
 
-def _report(
-    ctx: RunContext[OrchestratorDeps], tool_name: str, message: str, ok: bool
-) -> str:
-    report_tool_outcome(ctx.deps, tool_name=tool_name, message=message, ok=ok)
-    return message
-
-
 @crowdin_toolset.tool
 async def list_projects(  # noqa: RUF029
     ctx: RunContext[OrchestratorDeps],
@@ -69,26 +60,13 @@ async def list_projects(  # noqa: RUF029
     Returns:
         JSON string of project summaries.
     """
-    try:
-        items = crowdin_list_projects(
-            token=_require_token(ctx.deps),
-            organization=ctx.deps.crowdin_organization,
-            base_url=ctx.deps.crowdin_base_url,
-            timeout_seconds=ctx.deps.crowdin_timeout,
-        )
-        return _report(
-            ctx,
-            "crowdin_list_projects",
-            summarize_list(items, label="projects"),
-            True,
-        )
-    except Exception as e:  # noqa: BLE001
-        return _report(
-            ctx,
-            "crowdin_list_projects",
-            error_message("List Crowdin projects", e),
-            False,
-        )
+    items = crowdin_list_projects(
+        token=_require_token(ctx.deps),
+        organization=ctx.deps.crowdin_organization,
+        base_url=ctx.deps.crowdin_base_url,
+        timeout_seconds=ctx.deps.crowdin_timeout,
+    )
+    return summarize_list(items, label="projects")
 
 
 @crowdin_toolset.tool
@@ -104,28 +82,15 @@ async def list_files(  # noqa: RUF029, D417
     Returns:
         JSON string of file summaries.
     """
-    try:
-        kwargs = _project_kwargs(project)
-        items = crowdin_list_files(
-            token=_require_token(ctx.deps),
-            organization=ctx.deps.crowdin_organization,
-            base_url=ctx.deps.crowdin_base_url,
-            timeout_seconds=ctx.deps.crowdin_timeout,
-            **kwargs,
-        )
-        return _report(
-            ctx,
-            "crowdin_list_files",
-            summarize_list(items, label="files", name_field="path"),
-            True,
-        )
-    except Exception as e:  # noqa: BLE001
-        return _report(
-            ctx,
-            "crowdin_list_files",
-            error_message("List Crowdin files", e),
-            False,
-        )
+    kwargs = _project_kwargs(project)
+    items = crowdin_list_files(
+        token=_require_token(ctx.deps),
+        organization=ctx.deps.crowdin_organization,
+        base_url=ctx.deps.crowdin_base_url,
+        timeout_seconds=ctx.deps.crowdin_timeout,
+        **kwargs,
+    )
+    return summarize_list(items, label="files", name_field="path")
 
 
 @crowdin_toolset.tool
@@ -141,28 +106,15 @@ async def list_languages(  # noqa: RUF029, D417
     Returns:
         JSON string of language summaries.
     """
-    try:
-        kwargs = _project_kwargs(project)
-        items = crowdin_list_languages(
-            token=_require_token(ctx.deps),
-            organization=ctx.deps.crowdin_organization,
-            base_url=ctx.deps.crowdin_base_url,
-            timeout_seconds=ctx.deps.crowdin_timeout,
-            **kwargs,
-        )
-        return _report(
-            ctx,
-            "crowdin_list_languages",
-            summarize_list(items, label="languages", name_field="name"),
-            True,
-        )
-    except Exception as e:  # noqa: BLE001
-        return _report(
-            ctx,
-            "crowdin_list_languages",
-            error_message("List Crowdin languages", e),
-            False,
-        )
+    kwargs = _project_kwargs(project)
+    items = crowdin_list_languages(
+        token=_require_token(ctx.deps),
+        organization=ctx.deps.crowdin_organization,
+        base_url=ctx.deps.crowdin_base_url,
+        timeout_seconds=ctx.deps.crowdin_timeout,
+        **kwargs,
+    )
+    return summarize_list(items, label="languages", name_field="name")
 
 
 @crowdin_toolset.tool
@@ -180,33 +132,20 @@ async def get_progress(  # noqa: RUF029, D417
     Returns:
         JSON string of progress data.
     """
-    try:
-        kwargs = _project_kwargs(project)
-        items = crowdin_progress(
-            token=_require_token(ctx.deps),
-            organization=ctx.deps.crowdin_organization,
-            base_url=ctx.deps.crowdin_base_url,
-            timeout_seconds=ctx.deps.crowdin_timeout,
-            file_id=None,
-            language=language,
-            **kwargs,
-        )
-        return _report(
-            ctx,
-            "crowdin_get_progress",
-            summarize_progress(items),
-            True,
-        )
-    except Exception as e:  # noqa: BLE001
-        return _report(
-            ctx,
-            "crowdin_get_progress",
-            error_message("Get Crowdin progress", e),
-            False,
-        )
+    kwargs = _project_kwargs(project)
+    items = crowdin_progress(
+        token=_require_token(ctx.deps),
+        organization=ctx.deps.crowdin_organization,
+        base_url=ctx.deps.crowdin_base_url,
+        timeout_seconds=ctx.deps.crowdin_timeout,
+        file_id=None,
+        language=language,
+        **kwargs,
+    )
+    return summarize_progress(items)
 
 
-@crowdin_toolset.tool(requires_approval=True)
+@crowdin_toolset.tool
 async def download_translation(  # noqa: RUF029, D417
     ctx: RunContext[OrchestratorDeps],
     project: str,
@@ -226,38 +165,21 @@ async def download_translation(  # noqa: RUF029, D417
     Returns:
         Confirmation message with output path.
     """
-    try:
-        kwargs = _project_kwargs(project)
-        crowdin_download(
-            token=_require_token(ctx.deps),
-            organization=ctx.deps.crowdin_organization,
-            base_url=ctx.deps.crowdin_base_url,
-            timeout_seconds=ctx.deps.crowdin_timeout,
-            file_id=file_id,
-            language=language,
-            output_path=output_path,
-            **kwargs,
-        )
-        message = f"Downloaded to {output_path}"
-        report_tool_outcome(
-            ctx.deps,
-            tool_name="crowdin_download_translation",
-            message=message,
-            ok=True,
-        )
-        return message
-    except Exception as e:  # noqa: BLE001
-        message = error_message("Crowdin download", e)
-        report_tool_outcome(
-            ctx.deps,
-            tool_name="crowdin_download_translation",
-            message=message,
-            ok=False,
-        )
-        return message
+    kwargs = _project_kwargs(project)
+    crowdin_download(
+        token=_require_token(ctx.deps),
+        organization=ctx.deps.crowdin_organization,
+        base_url=ctx.deps.crowdin_base_url,
+        timeout_seconds=ctx.deps.crowdin_timeout,
+        file_id=file_id,
+        language=language,
+        output_path=output_path,
+        **kwargs,
+    )
+    return f"Downloaded to {output_path}"
 
 
-@crowdin_toolset.tool(requires_approval=True)
+@crowdin_toolset.tool
 async def upload_translation(  # noqa: RUF029, D417
     ctx: RunContext[OrchestratorDeps],
     project: str,
@@ -277,32 +199,15 @@ async def upload_translation(  # noqa: RUF029, D417
     Returns:
         Confirmation message.
     """
-    try:
-        kwargs = _project_kwargs(project)
-        crowdin_upload(
-            token=_require_token(ctx.deps),
-            organization=ctx.deps.crowdin_organization,
-            base_url=ctx.deps.crowdin_base_url,
-            timeout_seconds=ctx.deps.crowdin_timeout,
-            file_id=file_id,
-            language=language,
-            file_path=file_path,
-            **kwargs,
-        )
-        message = f"Uploaded {file_path} to Crowdin"
-        report_tool_outcome(
-            ctx.deps,
-            tool_name="crowdin_upload_translation",
-            message=message,
-            ok=True,
-        )
-        return message
-    except Exception as e:  # noqa: BLE001
-        message = error_message("Crowdin upload", e)
-        report_tool_outcome(
-            ctx.deps,
-            tool_name="crowdin_upload_translation",
-            message=message,
-            ok=False,
-        )
-        return message
+    kwargs = _project_kwargs(project)
+    crowdin_upload(
+        token=_require_token(ctx.deps),
+        organization=ctx.deps.crowdin_organization,
+        base_url=ctx.deps.crowdin_base_url,
+        timeout_seconds=ctx.deps.crowdin_timeout,
+        file_id=file_id,
+        language=language,
+        file_path=file_path,
+        **kwargs,
+    )
+    return f"Uploaded {file_path} to Crowdin"

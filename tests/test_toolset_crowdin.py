@@ -11,9 +11,8 @@ from aitran.toolsets.crowdin import (
 )
 
 
-async def test_download_translation_reports_result_to_terminal(monkeypatch):
+async def test_download_translation(monkeypatch):
     calls: list[dict] = []
-    reports: list[tuple[str, str, bool]] = []
 
     def fake_download(**kwargs):
         calls.append(kwargs)
@@ -23,12 +22,7 @@ async def test_download_translation_reports_result_to_terminal(monkeypatch):
         fake_download,
     )
 
-    ctx = SimpleNamespace(
-        deps=OrchestratorDeps(
-            crowdin_token="token",
-            tool_reporter=lambda *args: reports.append(args),
-        )
-    )
+    ctx = SimpleNamespace(deps=OrchestratorDeps(crowdin_token="token"))
 
     result = await download_translation(
         ctx,
@@ -52,12 +46,10 @@ async def test_download_translation_reports_result_to_terminal(monkeypatch):
             "project": "demo",
         }
     ]
-    assert reports == [("crowdin_download_translation", result, True)]
 
 
-async def test_upload_translation_reports_result_to_terminal(monkeypatch):
+async def test_upload_translation(monkeypatch):
     calls: list[dict] = []
-    reports: list[tuple[str, str, bool]] = []
 
     def fake_upload(**kwargs):
         calls.append(kwargs)
@@ -67,12 +59,7 @@ async def test_upload_translation_reports_result_to_terminal(monkeypatch):
         fake_upload,
     )
 
-    ctx = SimpleNamespace(
-        deps=OrchestratorDeps(
-            crowdin_token="token",
-            tool_reporter=lambda *args: reports.append(args),
-        )
-    )
+    ctx = SimpleNamespace(deps=OrchestratorDeps(crowdin_token="token"))
 
     result = await upload_translation(
         ctx,
@@ -96,4 +83,3 @@ async def test_upload_translation_reports_result_to_terminal(monkeypatch):
             "project": None,
         }
     ]
-    assert reports == [("crowdin_upload_translation", result, True)]

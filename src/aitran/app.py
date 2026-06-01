@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import json
 import sys
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.buffer import Buffer
     from prompt_toolkit.document import Document
+    from pydantic_ai.capabilities.hooks import Hooks
     from pydantic_ai.messages import ModelMessage
     from rich.console import Console, RenderableType
     from rich.live import Live
@@ -555,7 +557,11 @@ async def run_app_async(
     Returns:
         Final text output from the app.
     """
+    from pydantic_ai_backends import LocalBackend
+
     deps = deps or OrchestratorDeps()
+    if deps.backend is None:
+        deps.backend = LocalBackend()
     terminal = (
         _InteractiveTerminal(console, auto_approve=auto_approve)
         if console is not None and sys.stdin.isatty()
@@ -577,7 +583,71 @@ async def run_app_async(
     )
 
     handler = _build_deferred_handler(on_approval)
-    agent = build_orchestrator_agent(model, deferred_handler=handler)
+
+    # ToolGuard's on_approval callback only receives (tool_name, rule), not the
+    # tool call arguments.  Use a ContextVar to bridge args from a preceding
+    # before_tool_execute hook to the approval callback.
+    current_tool_args: contextvars.ContextVar[dict[str, Any] | None] = (
+        contextvars.ContextVar("current_tool_args", default=None)
+    )
+
+    async def _toolguard_approval(tool_name: str, rule: object) -> bool:
+        """Bridge ToolGuard's on_approval to the app's approval callback.
+
+        Returns:
+            True to approve.  Raises SkipToolExecution on denial.
+
+        Raises:
+            SkipToolExecution: When the user denies, with their reason.
+        """
+        from pydantic_ai.exceptions import SkipToolExecution
+        from pydantic_ai_toolguard import PermissionRule
+
+        pattern = rule.tool_pattern if isinstance(rule, PermissionRule) else str(rule)
+        tool_args = current_tool_args.get()
+        if tool_args:
+            display_args = {**tool_args, "_rule": pattern}
+        else:
+            display_args = {"_rule": pattern}
+        result = on_approval(tool_name, display_args)
+        if inspect.isawaitable(result):
+            result = await result
+        if result is True:
+            return True
+        reason = result if isinstance(result, str) and result else "no reason given"
+        raise SkipToolExecution(
+            f"User declined to approve tool '{tool_name}': {reason}"
+        )
+
+    def _make_args_capture_hooks() -> Hooks:
+        """Build hooks that capture tool args for the approval bridge.
+
+        Returns:
+            Configured Hooks instance.
+        """
+        from pydantic_ai.capabilities.hooks import Hooks
+
+        hooks = Hooks()
+
+        @hooks.on.before_tool_execute
+        async def _capture_args(  # noqa: RUF029
+            _ctx: Any,
+            *,
+            call: Any,  # noqa: ARG001
+            tool_def: Any,  # noqa: ARG001
+            args: dict[str, Any],
+        ) -> dict[str, Any]:
+            current_tool_args.set(args)
+            return args
+
+        return hooks
+
+    agent = build_orchestrator_agent(
+        model,
+        deferred_handler=handler,
+        on_approval=_toolguard_approval,
+        extra_capabilities=[_make_args_capture_hooks()],
+    )
 
     # Restore or create session
     messages: list[ModelMessage] = []

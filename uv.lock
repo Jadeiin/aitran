@@ -16,7 +16,9 @@ dependencies = [
     { name = "crowdin-api-client" },
     { name = "platformdirs" },
     { name = "prompt-toolkit" },
+    { name = "pydantic-ai-backend", extra = ["console"] },
     { name = "pydantic-ai-slim", extra = ["anthropic", "openai", "retries"] },
+    { name = "pydantic-ai-toolguard" },
     { name = "rich" },
     { name = "translate-toolkit", version = "3.17.5", source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }, marker = "python_full_version < '3.11'" },
     { name = "translate-toolkit", version = "3.19.11", source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }, marker = "python_full_version >= '3.11'" },
@@ -59,8 +61,10 @@ requires-dist = [
     { name = "mlflow-tracing", marker = "extra == 'mlflow'", specifier = ">=3.1" },
     { name = "platformdirs", specifier = ">=4.0" },
     { name = "prompt-toolkit", specifier = ">=3.0" },
+    { name = "pydantic-ai-backend", extras = ["console"], specifier = ">=0.2.9" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "openai", "retries"], specifier = ">=1.0" },
     { name = "pydantic-ai-slim", extras = ["logfire"], marker = "extra == 'logfire'", specifier = ">=1.0" },
+    { name = "pydantic-ai-toolguard", specifier = ">=0.1.0" },
     { name = "rich", specifier = ">=13.0" },
     { name = "translate-toolkit", specifier = ">=3.14" },
     { name = "wlc", specifier = ">=2.0.0" },
@@ -167,6 +171,15 @@ source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
 sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/8e/ff/70dca7d7cb1cbc0edb2c6cc0c38b65cba36cccc491eca64cabd5fe7f8670/backports_asyncio_runner-1.2.0.tar.gz", hash = "sha256:a5aa7b2b7d8f8bfcaa2b57313f70792df84e32a2a746f585213373f900b42162", size = 69893, upload-time = "2025-07-02T02:27:15.685Z" }
 wheels = [
     { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/a0/59/76ab57e3fe74484f48a53f8e337171b4a2349e506eabe136d7e01d059086/backports_asyncio_runner-1.2.0-py3-none-any.whl", hash = "sha256:0da0a936a8aeb554eccb426dc55af3ba63bcdc69fa1a600b5bb305413a4477b5", size = 12313, upload-time = "2025-07-02T02:27:14.263Z" },
+]
+
+[[package]]
+name = "bracex"
+version = "2.6"
+source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
+sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/63/9a/fec38644694abfaaeca2798b58e276a8e61de49e2e37494ace423395febc/bracex-2.6.tar.gz", hash = "sha256:98f1347cd77e22ee8d967a30ad4e310b233f7754dbf31ff3fceb76145ba47dc7", size = 26642, upload-time = "2025-06-22T19:12:31.254Z" }
+wheels = [
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/9d/2a/9186535ce58db529927f6cf5990a849aa9e052eea3e2cfefe20b9e1802da/bracex-2.6-py3-none-any.whl", hash = "sha256:0b0049264e7340b3ec782b5cb99beb325f36c3782a32e36e876452fd49a09952", size = 11508, upload-time = "2025-06-22T19:12:29.781Z" },
 ]
 
 [[package]]
@@ -1488,6 +1501,24 @@ wheels = [
 ]
 
 [[package]]
+name = "pydantic-ai-backend"
+version = "0.2.9"
+source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "wcmatch" },
+]
+sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/53/cb/2f600855f141fc236988b3c883ca2407b3d0faa572298ecbb37e5c72dd50/pydantic_ai_backend-0.2.9.tar.gz", hash = "sha256:0d8f0df7b0d9997e1fca33c7dd9dd5a20325e9c32d4857926f2499c7566ad366", size = 13781524, upload-time = "2026-05-24T14:56:52.129Z" }
+wheels = [
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/57/8c/bd32acbfd785fd05bbc3f7c5920b5afb5c9bf211a0e2dddd92faa7ca5593/pydantic_ai_backend-0.2.9-py3-none-any.whl", hash = "sha256:f9fb51c5972726ab636b0b9eccac3112b127a7c3a8bbeca2d80fa7888e2fc0b7", size = 61333, upload-time = "2026-05-24T14:56:50.614Z" },
+]
+
+[package.optional-dependencies]
+console = [
+    { name = "pydantic-ai-slim" },
+]
+
+[[package]]
 name = "pydantic-ai-slim"
 version = "1.104.0"
 source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
@@ -1519,6 +1550,19 @@ openai = [
 ]
 retries = [
     { name = "tenacity" },
+]
+
+[[package]]
+name = "pydantic-ai-toolguard"
+version = "0.1.0"
+source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "pydantic-ai-slim" },
+]
+sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/d0/6c/89243d04a578ae6fe90726050fb9033a7354042a7e6d3c773217758e0ae8/pydantic_ai_toolguard-0.1.0.tar.gz", hash = "sha256:9a91f7fcb68f56221f4e894370e37d21ba09f13dfa6915fc5874ea726b4715c4", size = 12445, upload-time = "2026-04-08T13:30:35.552Z" }
+wheels = [
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/5d/bb/0d62289311418c1d6b876ba1981115d39ada812b566c818c1888606ce136/pydantic_ai_toolguard-0.1.0-py3-none-any.whl", hash = "sha256:977ba648512c74859090053bb8aaf515df4e5f2b7785b0a7b2a254ec9bb08708", size = 9964, upload-time = "2026-04-08T13:30:34.199Z" },
 ]
 
 [[package]]
@@ -2258,6 +2302,18 @@ source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
 sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/53/0c/06f8b233b8fd13b9e5ee11424ef85419ba0d8ba0b3138bf360be2ff56953/urllib3-2.7.0.tar.gz", hash = "sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c", size = 433602, upload-time = "2026-05-07T16:13:18.596Z" }
 wheels = [
     { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897", size = 131087, upload-time = "2026-05-07T16:13:17.151Z" },
+]
+
+[[package]]
+name = "wcmatch"
+version = "10.1"
+source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
+dependencies = [
+    { name = "bracex" },
+]
+sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/79/3e/c0bdc27cf06f4e47680bd5803a07cb3dfd17de84cde92dd217dcb9e05253/wcmatch-10.1.tar.gz", hash = "sha256:f11f94208c8c8484a16f4f48638a85d771d9513f4ab3f37595978801cb9465af", size = 117421, upload-time = "2025-06-22T19:14:02.49Z" }
+wheels = [
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/eb/d8/0d1d2e9d3fabcf5d6840362adcf05f8cf3cd06a73358140c3a97189238ae/wcmatch-10.1-py3-none-any.whl", hash = "sha256:5848ace7dbb0476e5e55ab63c6bbd529745089343427caa5537f230cc01beb8a", size = 39854, upload-time = "2025-06-22T19:14:00.978Z" },
 ]
 
 [[package]]

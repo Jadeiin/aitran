@@ -14,7 +14,6 @@ from aitran.toolsets.translate import (
 
 async def test_translate_file_passes_silent_progress(monkeypatch, tmp_path):
     calls: list[dict] = []
-    reports: list[tuple[str, str, bool]] = []
     path = tmp_path / "messages.po"
     path.write_text("", encoding="utf-8")
 
@@ -23,21 +22,17 @@ async def test_translate_file_passes_silent_progress(monkeypatch, tmp_path):
 
     monkeypatch.setattr("aitran.toolsets.translate.translate_po", fake_translate_po)
 
-    ctx = SimpleNamespace(
-        deps=OrchestratorDeps(tool_reporter=lambda *args: reports.append(args))
-    )
+    ctx = SimpleNamespace(deps=OrchestratorDeps())
     result = await translate_file(ctx, str(path), source_lang="en", target_lang="zh_CN")
 
     assert result == f"Translated PO file: {path}"
     assert calls[0]["progress"] is _SILENT_PROGRESS
     assert calls[0]["verbose"] is False
     assert calls[0]["output_path"] == str(path)
-    assert reports == [("translate_file", f"Translated PO file: {path}", True)]
 
 
 async def test_review_translated_file_passes_silent_progress(monkeypatch, tmp_path):
     calls: list[dict] = []
-    reports: list[tuple[str, str, bool]] = []
     path = tmp_path / "messages.po"
     path.write_text("", encoding="utf-8")
 
@@ -47,9 +42,7 @@ async def test_review_translated_file_passes_silent_progress(monkeypatch, tmp_pa
 
     monkeypatch.setattr("aitran.toolsets.translate.review_file", fake_review_file)
 
-    ctx = SimpleNamespace(
-        deps=OrchestratorDeps(tool_reporter=lambda *args: reports.append(args))
-    )
+    ctx = SimpleNamespace(deps=OrchestratorDeps())
     result = await review_translated_file(
         ctx,
         str(path),
@@ -61,7 +54,6 @@ async def test_review_translated_file_passes_silent_progress(monkeypatch, tmp_pa
     assert '"pass": 1' in result
     assert calls[0]["progress"] is _SILENT_PROGRESS
     assert calls[0]["auto_fix"] is True
-    assert reports == [("review_translated_file", result, True)]
 
 
 async def test_translate_file_forwards_tool_options(monkeypatch, tmp_path):

@@ -799,8 +799,9 @@ def translate_po_dir(
     owns_progress = progress is None
     progress = progress or _build_progress()
     with (
-        progress if owns_progress else nullcontext()
-    ), ThreadPoolExecutor(max_workers=max_workers) as executor:
+        progress if owns_progress else nullcontext(),
+        ThreadPoolExecutor(max_workers=max_workers) as executor,
+    ):
         futures = {
             executor.submit(
                 translate_po,
@@ -933,8 +934,9 @@ def translate_xliff_dir(
     owns_progress = progress is None
     progress = progress or _build_progress()
     with (
-        progress if owns_progress else nullcontext()
-    ), ThreadPoolExecutor(max_workers=max_workers) as executor:
+        progress if owns_progress else nullcontext(),
+        ThreadPoolExecutor(max_workers=max_workers) as executor,
+    ):
         futures = {
             executor.submit(
                 translate_xliff_file,

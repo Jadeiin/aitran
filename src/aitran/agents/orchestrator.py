@@ -12,13 +12,25 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, RunContext
-from pydantic_ai.capabilities import HandleDeferredToolCalls
+from pydantic_ai.capabilities import (
+    AgentCapability,
+    HandleDeferredToolCalls,
+    PrefixTools,
+    Toolset,
+)
+from pydantic_ai_backends import ConsoleCapability
+from pydantic_ai_backends.permissions import DEFAULT_RULESET
+from pydantic_ai_toolguard import PermissionRule, ToolGuard
 from translate.lang import data as lang_data
 
 from aitran.toolsets._base import OrchestratorDeps
+from aitran.toolsets._reporting import build_reporting_hooks
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model
+    from pydantic_ai_toolguard.capability import (
+        ApprovalCallback as ToolApprovalCallback,
+    )
 
 DeferredHandler = Callable[
     [RunContext[OrchestratorDeps], DeferredToolRequests],
@@ -98,6 +110,8 @@ def build_orchestrator_agent(
     model: Model,
     *,
     deferred_handler: DeferredHandler | None = None,
+    on_approval: ToolApprovalCallback | None = None,
+    extra_capabilities: list[AgentCapability[OrchestratorDeps]] | None = None,
 ) -> Agent[OrchestratorDeps, str | DeferredToolRequests]:
     """Build the orchestrator agent with all toolsets.
 
@@ -106,15 +120,76 @@ def build_orchestrator_agent(
         deferred_handler: Handler for deferred tool calls (approval flow).
             When provided, the agent uses HandleDeferredToolCalls to resolve
             approvals inline, so the run returns a plain string.
+        on_approval: Callback for ToolGuard approval-gated tools.
+            Receives (tool_name, permission_rule), returns True to approve.
+        extra_capabilities: Additional capabilities inserted before ToolGuard.
+            Used for hooks that need to run before approval checks.
 
     Returns:
         Configured orchestrator agent.
     """
-    from pydantic_ai.toolsets import PrefixedToolset
-
     from aitran.toolsets import crowdin_toolset, translate_toolset, weblate_toolset
 
-    capabilities: list = []
+    guard = ToolGuard(
+        on_approval=on_approval,
+        rules=[
+            # Crowdin/Weblate write operations need approval
+            PermissionRule(
+                tool_pattern="crowdin_download_translation",
+                action="allow",
+                requires_approval=True,
+            ),
+            PermissionRule(
+                tool_pattern="crowdin_upload_translation",
+                action="allow",
+                requires_approval=True,
+            ),
+            PermissionRule(
+                tool_pattern="weblate_download_translation",
+                action="allow",
+                requires_approval=True,
+            ),
+            PermissionRule(
+                tool_pattern="weblate_upload_translation",
+                action="allow",
+                requires_approval=True,
+            ),
+            # Translate/review need approval
+            PermissionRule(
+                tool_pattern="translate_file",
+                action="allow",
+                requires_approval=True,
+            ),
+            PermissionRule(
+                tool_pattern="review_translated_file",
+                action="allow",
+                requires_approval=True,
+            ),
+            # Read-only tools — allow without approval
+            PermissionRule(tool_pattern="crowdin_*", action="allow"),
+            PermissionRule(tool_pattern="weblate_*", action="allow"),
+            # Console/file tools — ToolGuard allows them through;
+            # ConsoleCapability enforces per-path permissions (secrets deny, write/edit ask)
+            PermissionRule(tool_pattern="read_file", action="allow"),
+            PermissionRule(tool_pattern="write_file", action="allow"),
+            PermissionRule(tool_pattern="edit_file", action="allow"),
+            PermissionRule(tool_pattern="ls", action="allow"),
+            PermissionRule(tool_pattern="glob", action="allow"),
+            PermissionRule(tool_pattern="grep", action="allow"),
+            # No wildcard deny rule needed — ToolGuard's default is deny.
+        ],
+    )
+
+    reporting_hooks = build_reporting_hooks()
+    capabilities: list[AgentCapability[OrchestratorDeps]] = [
+        PrefixTools(wrapped=Toolset(crowdin_toolset), prefix="crowdin"),
+        PrefixTools(wrapped=Toolset(weblate_toolset), prefix="weblate"),
+        Toolset(translate_toolset),
+        *(extra_capabilities or []),
+        guard,
+        ConsoleCapability(permissions=DEFAULT_RULESET, include_execute=False),
+        reporting_hooks,  # type: ignore[arg-type]
+    ]
     if deferred_handler is not None:
         capabilities.append(
             HandleDeferredToolCalls[OrchestratorDeps](handler=deferred_handler)
@@ -125,10 +200,5 @@ def build_orchestrator_agent(
         deps_type=OrchestratorDeps,
         output_type=[str, DeferredToolRequests],
         system_prompt=_build_orchestrator_system_prompt(),
-        toolsets=[
-            PrefixedToolset(crowdin_toolset, "crowdin_"),
-            PrefixedToolset(weblate_toolset, "weblate_"),
-            translate_toolset,
-        ],
         capabilities=capabilities,
     )
