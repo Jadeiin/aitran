@@ -54,8 +54,9 @@ The orchestrator agent uses a separate model (default
 planner with a fast translator.
 
 Write operations (download, translate, review, upload) require explicit
-confirmation. Use `--auto-approve` or the `/approve on` REPL command to
-skip prompts.
+confirmation. At a prompt, choose `a` to approve all remaining operations for
+the session or `p` to approve operations matching the same permission rule.
+Use `--auto-approve` or the `/approve on` REPL command to skip prompts.
 
 ### Direct translation
 
@@ -120,8 +121,9 @@ aitran [options]
 
 Agentic translation workflow. The agent inspects, downloads, translates,
 reviews, and uploads translations on supported localization platforms
-with your approval at each write step. If `--prompt` is omitted, `aitran`
-starts an interactive REPL with persistent history and session management.
+with session-scoped approval controls at each write step. If `--prompt` is
+omitted, `aitran` starts an interactive REPL with persistent history and
+session management.
 
 **REPL commands:** `/help`, `/approve on|off|status`, `/resume [id]`, `/exit`
 

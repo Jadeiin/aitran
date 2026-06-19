@@ -46,7 +46,8 @@ if TYPE_CHECKING:
 ApprovalCallback = Callable[[str, dict], bool | str | Awaitable[bool | str]]
 SlashCommandResult = str
 APP_PROMPT = "aitran> "
-APPROVE_PROMPT = "Approve? [Y/n] "
+APPROVE_PROMPT = "Approve? [Y/n/a=all/p=same rule] "
+APPROVE_PROMPT_NO_RULE = "Approve? [Y/n/a=all] "
 REASON_PROMPT = "Reason (optional): "
 
 _SLASH_COMMAND_HELP = {
@@ -94,6 +95,10 @@ class _InteractiveTerminal:
     _ephemeral_session: PromptSession[Any] | None = field(
         default=None, init=False, repr=False
     )
+    _approval_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock, init=False, repr=False
+    )
+    _approved_rules: set[str] = field(default_factory=set, init=False, repr=False)
 
     def init_prompt_session(self, history_path: Path) -> None:
         """Create the prompt_toolkit session with persistent history."""
@@ -126,21 +131,55 @@ class _InteractiveTerminal:
         if self.auto_approve:
             self.report_tool_result(tool_name, "Auto-approved.", True)
             return True
-        paused_here = self._pause_live_output()
-        try:
-            args_str = json.dumps(args, ensure_ascii=False, indent=2)
-            self.console.print(f"\n[bold yellow]Approve:[/] [cyan]{tool_name}[/]")
-            self.console.print(f"  {args_str}")
-            answer = await self._read_line(APPROVE_PROMPT, record_history=False) or ""
-            if answer.strip().lower() in ("n", "no"):
-                reason = await self._read_line(REASON_PROMPT, record_history=False)
-                if reason is None:
-                    return False
-                return reason.strip() or False
-            return True
-        finally:
-            if paused_here:
-                self._resume_live_output()
+        async with self._approval_lock:
+            rule = args.get("_rule")
+            if self.auto_approve:
+                self.report_tool_result(
+                    tool_name, "Auto-approved for this session.", True
+                )
+                return True
+            if isinstance(rule, str) and rule in self._approved_rules:
+                self.report_tool_result(
+                    tool_name,
+                    f"Auto-approved by session rule: {rule}",
+                    True,
+                )
+                return True
+
+            paused_here = self._pause_live_output()
+            try:
+                display_args = {
+                    key: value for key, value in args.items() if key != "_rule"
+                }
+                args_str = json.dumps(display_args, ensure_ascii=False, indent=2)
+                self.console.print(f"\n[bold yellow]Approve:[/] [cyan]{tool_name}[/]")
+                self.console.print(f"  {args_str}")
+                if isinstance(rule, str):
+                    self.console.print(f"  [dim]Rule: {rule}[/dim]")
+                prompt = (
+                    APPROVE_PROMPT if isinstance(rule, str) else APPROVE_PROMPT_NO_RULE
+                )
+                answer = await self._read_line(prompt, record_history=False) or ""
+                choice = answer.strip().lower()
+                if choice in ("n", "no"):
+                    reason = await self._read_line(REASON_PROMPT, record_history=False)
+                    if reason is None:
+                        return False
+                    return reason.strip() or False
+                if choice in ("a", "all"):
+                    self.auto_approve = True
+                    self.console.print(
+                        "[dim]Auto-approve enabled for this session.[/dim]"
+                    )
+                elif isinstance(rule, str) and choice in ("p", "pattern", "same"):
+                    self._approved_rules.add(rule)
+                    self.console.print(
+                        f"[dim]Auto-approved rule for this session: {rule}[/dim]"
+                    )
+                return True
+            finally:
+                if paused_here:
+                    self._resume_live_output()
 
     def report_tool_result(self, tool_name: str, message: str, ok: bool) -> None:
         """Print an immediate status line for a completed approved tool."""
@@ -201,6 +240,7 @@ class _InteractiveTerminal:
             self.auto_approve = True
         elif action == "off":
             self.auto_approve = False
+            self._approved_rules.clear()
         elif action == "toggle":
             self.auto_approve = not self.auto_approve
         elif action != "status":

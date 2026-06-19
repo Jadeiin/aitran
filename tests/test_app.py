@@ -307,9 +307,44 @@ async def test_interactive_terminal_approval_uses_shared_console():
 
     assert result == "参数不对"
     assert console.prompts == [
-        "Approve? [Y/n] ",
+        "Approve? [Y/n/a=all] ",
         "Reason (optional): ",
     ]
+
+
+async def test_interactive_terminal_serializes_concurrent_approvals():
+    class ConcurrentPromptSession:
+        def __init__(self) -> None:
+            self.first_started = asyncio.Event()
+            self.release_first = asyncio.Event()
+            self.active = 0
+            self.max_active = 0
+
+        async def prompt_async(self, _prompt: str) -> str:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            try:
+                if not self.first_started.is_set():
+                    self.first_started.set()
+                    await self.release_first.wait()
+                return ""
+            finally:
+                self.active -= 1
+
+    console = DummyConsole([])
+    prompt_session = ConcurrentPromptSession()
+    terminal = app._InteractiveTerminal(console=console)
+    terminal._ephemeral_session = prompt_session
+    terminal.session = prompt_session
+
+    first = asyncio.create_task(terminal.approval("translate_file", {"path": "a.po"}))
+    await prompt_session.first_started.wait()
+    second = asyncio.create_task(terminal.approval("review_file", {"path": "b.po"}))
+    await asyncio.sleep(0)
+
+    prompt_session.release_first.set()
+    assert await asyncio.gather(first, second) == [True, True]
+    assert prompt_session.max_active == 1
 
 
 async def test_interactive_terminal_approval_preserves_output_order():
@@ -326,6 +361,48 @@ async def test_interactive_terminal_approval_preserves_output_order():
     assert len(console.printed) == 3
     assert "Approve:" in console.printed[1]
     assert "object_path" in console.printed[2]
+
+
+async def test_interactive_terminal_approves_all_for_session():
+    console = DummyConsole(["a"])
+    terminal = app._InteractiveTerminal(console=console)
+
+    assert await terminal.approval("translate_file", {"_rule": "translate_file"})
+    assert await terminal.approval("write_file", {"_rule": "write_file"})
+
+    assert terminal.auto_approve is True
+    assert console.prompts == ["Approve? [Y/n/a=all/p=same rule] "]
+    assert "Auto-approved." in console.printed[-1]
+
+
+async def test_interactive_terminal_approves_same_rule_for_session():
+    console = DummyConsole(["p", ""])
+    terminal = app._InteractiveTerminal(console=console)
+
+    assert await terminal.approval("write_file", {"path": "a", "_rule": "write_file"})
+    assert await terminal.approval("write_file", {"path": "b", "_rule": "write_file"})
+    assert await terminal.approval(
+        "translate_file", {"path": "c", "_rule": "translate_file"}
+    )
+
+    assert console.prompts == [
+        "Approve? [Y/n/a=all/p=same rule] ",
+        "Approve? [Y/n/a=all/p=same rule] ",
+    ]
+    assert any(
+        "Auto-approved by session rule: write_file" in line for line in console.printed
+    )
+
+
+async def test_interactive_terminal_approve_off_clears_session_rules():
+    console = DummyConsole(["p", ""])
+    terminal = app._InteractiveTerminal(console=console)
+
+    assert await terminal.approval("write_file", {"_rule": "write_file"})
+    assert terminal.handle_slash_command("/approve off") == "handled"
+    assert await terminal.approval("write_file", {"_rule": "write_file"})
+
+    assert len(console.prompts) == 2
 
 
 def test_interactive_terminal_reports_completed_tool():
