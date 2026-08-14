@@ -110,171 +110,57 @@ def test_translate_command_enables_mlflow(monkeypatch, tmp_path):
     assert calls[4] == ("flush_mlflow", True)
 
 
-def test_top_level_app_allows_missing_prompt(monkeypatch):
-    calls = []
-
-    def disabled(**_kwargs) -> bool:
-        del _kwargs
-        return False
-
-    def noop(**_kwargs) -> None:
-        del _kwargs
-
-    def fake_run_app(
-        prompt,
-        *,
-        orchestrator_model,
-        orchestrator_api_key,
-        orchestrator_api_host,
-        orchestrator_temperature,
-        deps,
-        session_id,
-        resume,
-        auto_approve,
-        console,
-    ):
-        del deps, console
-        calls.append((
-            prompt,
-            orchestrator_model,
-            orchestrator_api_key,
-            orchestrator_api_host,
-            orchestrator_temperature,
-            session_id,
-            resume,
-            auto_approve,
-        ))
-        return ""
-
-    monkeypatch.setattr(cli, "setup_logfire", disabled)
-    monkeypatch.setattr(cli, "flush_logfire", noop)
-    monkeypatch.setattr(cli, "setup_mlflow", disabled)
-    monkeypatch.setattr(cli, "flush_mlflow", noop)
-
+def _install_fake_web_module(monkeypatch, calls):
     import sys
     import types
 
+    def fake_run_web_app(**kwargs):
+        calls.append(kwargs)
+
     fake_module = types.ModuleType("aitran.app")
-    fake_module.run_app = fake_run_app
+    fake_module.run_web_app = fake_run_web_app
     monkeypatch.setitem(sys.modules, "aitran.app", fake_module)
+
+
+def _disable_observability(monkeypatch):
+    monkeypatch.setattr(cli, "setup_logfire", lambda **_kwargs: False)
+    monkeypatch.setattr(cli, "flush_logfire", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "setup_mlflow", lambda **_kwargs: False)
+    monkeypatch.setattr(cli, "flush_mlflow", lambda **_kwargs: None)
+
+
+def test_default_command_launches_webui(monkeypatch):
+    calls = []
+    _disable_observability(monkeypatch)
+    _install_fake_web_module(monkeypatch, calls)
 
     result = CliRunner().invoke(cli.app, [], env={})
 
     assert result.exit_code == 0
-    assert len(calls) == 1
-    prompt, model, _key, host, temperature, session_id, resume, auto_approve = calls[0]
-    assert prompt is None
-    assert model == "deepseek:deepseek-v4-pro"
-    assert host is None
-    assert temperature == pytest.approx(0.5)
-    assert session_id is None
-    assert resume is False
-    assert auto_approve is False
+    assert calls[0]["orchestrator_model"] == "deepseek:deepseek-v4-pro"
+    assert calls[0]["orchestrator_temperature"] == pytest.approx(0.5)
+    assert calls[0]["web_host"] == "127.0.0.1"
+    assert calls[0]["web_port"] == 7932
 
 
-def test_default_command_launches_app(monkeypatch):
+def test_top_level_webui_options(monkeypatch):
     calls = []
-
-    def disabled(**_kwargs) -> bool:
-        del _kwargs
-        return False
-
-    def noop(**_kwargs) -> None:
-        del _kwargs
-
-    def fake_run_app(
-        prompt,
-        *,
-        orchestrator_model,
-        orchestrator_api_key,
-        orchestrator_api_host,
-        orchestrator_temperature,
-        deps,
-        session_id,
-        resume,
-        auto_approve,
-        console,
-    ):
-        del (
-            orchestrator_model,
-            orchestrator_api_key,
-            orchestrator_api_host,
-            orchestrator_temperature,
-            deps,
-            session_id,
-            resume,
-            console,
-        )
-        calls.append((prompt, auto_approve))
-        return ""
-
-    monkeypatch.setattr(cli, "setup_logfire", disabled)
-    monkeypatch.setattr(cli, "flush_logfire", noop)
-    monkeypatch.setattr(cli, "setup_mlflow", disabled)
-    monkeypatch.setattr(cli, "flush_mlflow", noop)
-
-    import sys
-    import types
-
-    fake_module = types.ModuleType("aitran.app")
-    fake_module.run_app = fake_run_app
-    monkeypatch.setitem(sys.modules, "aitran.app", fake_module)
+    _disable_observability(monkeypatch)
+    _install_fake_web_module(monkeypatch, calls)
 
     result = CliRunner().invoke(
-        cli.app,
-        ["--auto-approve", "--prompt", "translate this"],
-        env={},
+        cli.app, ["--web-host", "0.0.0.0", "--web-port", "9000"], env={}
     )
 
     assert result.exit_code == 0
-    assert calls == [("translate this", True)]
+    assert calls[0]["web_host"] == "0.0.0.0"
+    assert calls[0]["web_port"] == 9000
 
 
 def test_top_level_app_reads_app_envvars(monkeypatch):
     calls = []
-
-    def disabled(**_kwargs) -> bool:
-        del _kwargs
-        return False
-
-    def noop(**_kwargs) -> None:
-        del _kwargs
-
-    def fake_run_app(
-        prompt,
-        *,
-        orchestrator_model,
-        orchestrator_api_key,
-        orchestrator_api_host,
-        orchestrator_temperature,
-        deps,
-        session_id,
-        resume,
-        auto_approve,
-        console,
-    ):
-        del deps, session_id, resume, console
-        calls.append((
-            prompt,
-            orchestrator_model,
-            orchestrator_api_key,
-            orchestrator_api_host,
-            orchestrator_temperature,
-            auto_approve,
-        ))
-        return ""
-
-    monkeypatch.setattr(cli, "setup_logfire", disabled)
-    monkeypatch.setattr(cli, "flush_logfire", noop)
-    monkeypatch.setattr(cli, "setup_mlflow", disabled)
-    monkeypatch.setattr(cli, "flush_mlflow", noop)
-
-    import sys
-    import types
-
-    fake_module = types.ModuleType("aitran.app")
-    fake_module.run_app = fake_run_app
-    monkeypatch.setitem(sys.modules, "aitran.app", fake_module)
+    _disable_observability(monkeypatch)
+    _install_fake_web_module(monkeypatch, calls)
 
     result = CliRunner().invoke(
         cli.app,
@@ -284,11 +170,16 @@ def test_top_level_app_reads_app_envvars(monkeypatch):
             "AITRAN_APP_KEY": "secret",
             "AITRAN_APP_HOST": "https://example.com/api",
             "AITRAN_APP_TMP": "0.4",
-            "AITRAN_APP_AUTO_APPROVE": "1",
+            "AITRAN_WEB_HOST": "0.0.0.0",
+            "AITRAN_WEB_PORT": "8123",
         },
     )
 
     assert result.exit_code == 0
-    assert calls == [
-        (None, "openai:gpt-5", "secret", "https://example.com/api", 0.4, True)
-    ]
+    call = calls[0]
+    assert call["orchestrator_model"] == "openai:gpt-5"
+    assert call["orchestrator_api_key"] == "secret"
+    assert call["orchestrator_api_host"] == "https://example.com/api"
+    assert call["orchestrator_temperature"] == pytest.approx(0.4)
+    assert call["web_host"] == "0.0.0.0"
+    assert call["web_port"] == 8123

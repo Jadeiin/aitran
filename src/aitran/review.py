@@ -103,12 +103,13 @@ async def _review_batch(
     Returns:
         List of ReviewedUnit for units that need revise or reject handling.
     """
-    user_msg = build_review_input_xml(units, qa_reports)
+    deps.batch_xml = build_review_input_xml(units, qa_reports)
+    deps.batch_retrieved = False
     valid_indices = set(deps.expected_indices)
     seen: set[int] = set()
 
     async with agent.run_stream(
-        user_msg,
+        "Review the assigned batch. Retrieve it with your batch tool first.",
         deps=deps,
         message_history=history,
     ) as run:

@@ -7,15 +7,15 @@ This file provides guidance to Coding agents when working with code in this repo
 ```bash
 uv run pytest                          # run all tests
 uv run pytest tests/test_translate.py  # run a single test file
-uv run pytest tests/test_app.py        # run interactive app tests
+uv run pytest tests/test_app.py        # run WebUI wiring tests
 uv run pytest -k test_pattern          # run by keyword
 uv run ruff check --fix                # lint + auto-fix
 uv run ruff format                     # format
 
 uvx prek install                       # install pre-commit hooks (uses `prek`, NOT `pre-commit`)
 uv run aitran --po file.po -l zh       # run the CLI
-uv run aitran                          # launch the interactive app
-uv run aitran --prompt "translate this project to zh"  # one-shot app prompt
+uv run aitran                          # launch the orchestrator WebUI
+uv run aitran --web-host 0.0.0.0 --web-port 9000
 ```
 
 Python 3.10+. Package manager: `uv`. Build backend: `uv_build`.
@@ -34,12 +34,13 @@ format.
 
 Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (Click group).
 
-- `cli.py` — Click CLI; bare `aitran` launches the interactive app, and `translate`, `review`, `sync`, `remove`, `userdict`, `crowdin`, `weblate` remain as subcommands
-- `app.py` — interactive app session management, REPL, resume handling, and deferred-tool approval loop
+- `cli.py` — Click CLI; bare `aitran` launches the orchestrator WebUI, while `translate`, `review`, `sync`, `remove`, `userdict`, `crowdin`, `weblate` remain headless subcommands
+- `app.py` — thin `Agent.to_web()` + Uvicorn adapter for the orchestrator WebUI
 - `agents/` — pydantic-ai agent definitions:
-  - `_base.py` — model routing (`build_model`), XML prompt builder (`build_input_xml`), shared helpers
+  - `_base.py` — model routing (`build_model`) and shared prompt helpers
   - `translator.py` — translator agent (`build_translator_agent`), output types (`TranslatedUnit` / `TranslationBatch`), prompts
   - `reviewer.py` — reviewer agent (`build_reviewer_agent`), output types (`ReviewedUnit` / `ReviewBatch`)
+  - `workflows.py` — translation/review workflow subagents delegated through Pydantic AI Harness
 - `translate.py` — batch translation loop with streaming via `rich` progress bars; `PoTranslator` and `XliffTranslator` adapter classes handle format-specific parse/filter/apply/save
 - `dicts.py` — glossary lookup with cascading config discovery (CWD → git root → XDG dir)
 - `manipulate.py` — PO entry removal by filter (fuzzy, obsolete, regex reference match)
@@ -53,19 +54,20 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 1. CLI parses args → calls `translate_po` / `translate_xliff_file`
 2. Adapter parses file, filters units needing translation
 3. `_run_translation_async` batches units by accumulated char length (`--context-length`, default 4096)
-4. Each batch: `build_input_xml()` serializes units → agent streams results → translate-toolkit entity decoding reverses XML escaping → adapter applies results through format APIs and saves
+4. Each batch: the format-specific input builder serializes units into agent deps → translator/reviewer calls its retrieval tool → agent streams results → translate-toolkit entity decoding reverses XML escaping → adapter applies results through format APIs and saves
 5. Progress rendered via `rich.progress.Progress` with per-unit verbose output
 
 ### Model routing
 
 `build_model()` in `agents/_base.py` splits on `:` to get provider:model. Anthropic gets special `AnthropicModel` with prompt caching; all other providers route through `OpenAIChatModel` using pydantic-ai's `infer_provider_class()`. Unknown providers fall back to `OpenAIProvider` (OpenAI-compatible gateways).
 
-### Interactive app
+### Web app
 
-- Top-level entry: `aitran`
-- One-shot prompt: `aitran --prompt "..."`
-- Resume: `aitran --resume --session-id <id>`
-- Environment for the app entry uses `AITRAN_APP_*` orchestrator settings (`AITRAN_APP_MODEL`, `AITRAN_APP_KEY`, `AITRAN_APP_HOST`, `AITRAN_APP_TMP`, `AITRAN_APP_AUTO_APPROVE`)
+- Top-level entry: `aitran` serves Pydantic AI's WebUI
+- Bind options: `--web-host`, `--web-port`
+- Environment uses `AITRAN_APP_*` model settings plus `AITRAN_WEB_HOST` / `AITRAN_WEB_PORT`
+- Write tools and Harness delegation use native deferred approval; do not reintroduce a separate toolguard layer
+- Harness `SubAgents` must use `agent_folders=None` and `inherit_tools=False` so only explicit workflow agents are loaded and platform tools are not inherited
 
 ## Conventions & Gotchas
 
@@ -83,51 +85,3 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 - **HTML/XML escaping**: `format_as_xml` escapes `<>&` in source text when building the prompt XML. `_decode_serialized_markup()` in `translate.py` conditionally reverses this by decoding only entities (`&amp;`, `&lt;`, `&gt;`) whose corresponding characters appeared in the original source. The prompt also explicitly instructs the LLM not to escape output. Both layers exist because LLMs are unreliable at following XML-escaping instructions.
 - **XLIFF mutation**: Do not edit XLIFF XML nodes manually when applying translations. Use `xliffunit.settarget()`, `marktranslated()`, `markreviewneeded()`, and note APIs so translate-toolkit owns node creation, XML-safe text, and state mapping.
 - **Rate limiting**: HTTP 429 triggers a 20-second sleep before retry. Timeouts (408/504) retry immediately.
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
-```
-
-### Rules
-
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
-
-## Session Completion
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-<!-- END BEADS INTEGRATION -->

@@ -131,16 +131,18 @@ async def test_translate_batch_success():
     )
     agent = build_translator_agent(model)
     units = [FakeUnit("hello"), FakeUnit("world")]
+    deps = _make_deps()
     with agent.override(model=model):
         results = await _translate_batch(
             agent,
             units,
             1,
-            _make_deps(),
+            deps,
             [],
             on_progress=None,
         )
     assert len(results) == 2
+    assert deps.batch_retrieved is True
     assert results[0].targets[0] == "你好"
     assert results[1].targets[0] == "世界"
 

@@ -6,12 +6,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelRetry, format_as_xml
+from pydantic_ai import Agent, ModelRetry, RunContext, format_as_xml
 
 from aitran.agents._base import build_unit_prompt_fields, format_language_label
 
 if TYPE_CHECKING:
-    from pydantic_ai import RunContext
     from pydantic_ai.models import Model
 
     from aitran.qa import UnitQAReport
@@ -108,12 +107,14 @@ class ReviewBatch(BaseModel):
 
 @dataclass
 class ReviewDeps:
-    """Per-run context injected into the reviewer agent at each batch."""
+    """Per-run context available to the reviewer subagent and its tools."""
 
     source_lang: str
     target_lang: str
     context: str
     expected_indices: tuple[int, ...]
+    batch_xml: str = ""
+    batch_retrieved: bool = False
 
 
 def build_review_input_xml(
@@ -151,7 +152,7 @@ def build_review_input_xml(
 
 
 def build_reviewer_agent(model: Model) -> Agent[ReviewDeps, ReviewBatch]:
-    """Build the reviewer agent.
+    """Build the tool-using reviewer subagent.
 
     Returns:
         A configured Pydantic AI Agent with output validation.
@@ -165,13 +166,25 @@ def build_reviewer_agent(model: Model) -> Agent[ReviewDeps, ReviewBatch]:
         retries={"output": 3},
     )
 
+    @agent.tool
+    def get_review_batch(ctx: RunContext[ReviewDeps]) -> str:
+        """Retrieve the translated units assigned to this subagent run.
+
+        Returns:
+            XML containing indexed sources, targets, and QA findings.
+        """
+        ctx.deps.batch_retrieved = True
+        return ctx.deps.batch_xml
+
     @agent.instructions
     def task_context(ctx: RunContext[ReviewDeps]) -> str:
         source_label = format_language_label(ctx.deps.source_lang)
         target_label = format_language_label(ctx.deps.target_lang)
         parts = [
             f"Review translations from `{source_label}` to `{target_label}` "
-            f"(XPG/POSIX locale names used in Unix-like systems and GNU Gettext)."
+            f"(XPG/POSIX locale names used in Unix-like systems and GNU Gettext).",
+            "Call `get_review_batch` before producing output. The review units "
+            "are available only through that tool.",
         ]
         if ctx.deps.context:
             parts.append(f"File context: {ctx.deps.context}")

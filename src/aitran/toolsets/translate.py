@@ -1,4 +1,4 @@
-"""Translate toolset — wraps translate.py and review.py as orchestrator tools."""
+"""Deterministic file workers used by translation and review subagents."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pydantic_ai import RunContext  # noqa: TC002
-from pydantic_ai.toolsets import FunctionToolset
 
 from aitran.review import review_file
 from aitran.toolsets._base import OrchestratorDeps  # noqa: TC001
@@ -19,8 +18,6 @@ from aitran.translate import (
     translate_xliff_dir,
     translate_xliff_file,
 )
-
-translate_toolset: FunctionToolset[OrchestratorDeps] = FunctionToolset()
 
 
 def _noop_print(*_args, **_kwargs) -> None:
@@ -80,7 +77,6 @@ def _detect_format(path: str) -> str:
     raise ValueError(f"Unsupported file format: {ext}")
 
 
-@translate_toolset.tool
 async def translate_file(  # noqa: D417
     ctx: RunContext[OrchestratorDeps],
     path: str,
@@ -137,7 +133,14 @@ async def translate_file(  # noqa: D417
             profile=profile,
             **kwargs,
         )
-        return f"Translated PO file: {path}"
+        return json.dumps(
+            {
+                "status": "translated",
+                "input_path": path,
+                "output_path": resolved_output,
+            },
+            ensure_ascii=False,
+        )
 
     if fmt == "xliff":
         await asyncio.to_thread(
@@ -155,7 +158,14 @@ async def translate_file(  # noqa: D417
             order=order,
             **kwargs,
         )
-        return f"Translated XLIFF file: {path}"
+        return json.dumps(
+            {
+                "status": "translated",
+                "input_path": path,
+                "output_path": resolved_output,
+            },
+            ensure_ascii=False,
+        )
 
     # Directory
     po_files = [f for f in os.listdir(path) if f.endswith(".po")]
@@ -193,10 +203,17 @@ async def translate_file(  # noqa: D417
             **kwargs,
         )
     total = len(po_files) + len(xliff_files)
-    return f"Translated {total} file(s) in {path}"
+    return json.dumps(
+        {
+            "status": "translated",
+            "input_path": path,
+            "output_path": path,
+            "file_count": total,
+        },
+        ensure_ascii=False,
+    )
 
 
-@translate_toolset.tool
 async def review_translated_file(  # noqa: D417
     ctx: RunContext[OrchestratorDeps],
     path: str,
@@ -242,4 +259,13 @@ async def review_translated_file(  # noqa: D417
         progress=_SILENT_PROGRESS,
         **kwargs,
     )
-    return json.dumps(summary, indent=2)
+    return json.dumps(
+        {
+            "status": "reviewed",
+            "input_path": path,
+            "output_path": output_path or path,
+            "summary": summary,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )

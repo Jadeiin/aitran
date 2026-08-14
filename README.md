@@ -30,33 +30,28 @@ export ANTHROPIC_API_KEY=sk-...  # Anthropic
 
 ### Agentic workflows
 
-`aitran` launches an agent-driven interactive session. The agent
-inspects your project, proposes a plan, and executes each step
-(download, translate, review, upload) with your approval.
+`aitran` starts Pydantic AI's WebUI with the workflow orchestrator. The agent
+inspects your localization project, proposes a plan, and delegates each step
+(download, translate, review, upload) with your approval in the browser.
 
 ```bash
-# Interactive REPL — multi-turn conversation with session persistence
+# Start the WebUI at http://127.0.0.1:7932
 aitran
 
-# One-shot: give the agent a natural-language request
-aitran --prompt "translate Crowdin project MyApp to Chinese"
-
-# Resume a previous session
-aitran --resume --session-id abc123
-
-# Use a different orchestrator model
-aitran -m openai:gpt-5.4-mini --prompt "translate Weblate component app/zh_Hans"
+# Bind the WebUI to another address and port
+aitran -m openai:gpt-5.4-mini --web-host 0.0.0.0 --web-port 9000
 ```
 
-The orchestrator agent uses a separate model (default
+The orchestrator uses Pydantic AI Harness `SubAgents` to delegate isolated,
+self-contained tasks to the translator and reviewer. It uses a separate model (default
 `deepseek:deepseek-v4-pro`) from the translation/review sub-tasks
 (default `deepseek:deepseek-v4-flash`), so you can pair a capable
 planner with a fast translator.
 
-Write operations (download, translate, review, upload) require explicit
-confirmation. At a prompt, choose `a` to approve all remaining operations for
-the session or `p` to approve operations matching the same permission rule.
-Use `--auto-approve` or the `/approve on` REPL command to skip prompts.
+Write operations (download, translation delegation, review delegation, upload)
+use Pydantic AI's native deferred-tool approval in the WebUI. Translator and
+reviewer subagents retrieve their assigned PO/XLIFF batches through tools;
+translation entries are not injected into the orchestrator conversation.
 
 ### Direct translation
 
@@ -91,11 +86,12 @@ Models are specified in `<provider>:<model>` format:
 
 | Variable | Description |
 |---|---|
-| `AITRAN_APP_MODEL` | Orchestrator model for the top-level interactive app (default: `deepseek:deepseek-v4-pro`) |
+| `AITRAN_APP_MODEL` | Orchestrator model for the WebUI (default: `deepseek:deepseek-v4-pro`) |
 | `AITRAN_APP_KEY` | API key for the orchestrator model |
 | `AITRAN_APP_HOST` | Custom API base URL for the orchestrator model |
 | `AITRAN_APP_TMP` | Orchestrator LLM temperature (default: `0.5`) |
-| `AITRAN_APP_AUTO_APPROVE` | Auto-approve tools in the interactive app (`1`, `true`, etc.) |
+| `AITRAN_WEB_HOST` | WebUI bind host (default: `127.0.0.1`) |
+| `AITRAN_WEB_PORT` | WebUI bind port (default: `7932`) |
 | `AITRAN_API_KEY` / `OPENAI_API_KEY` | API key |
 | `AITRAN_API_HOST` | Custom API base URL |
 | `AITRAN_MODEL` | Default model (default: `deepseek:deepseek-v4-flash`) |
@@ -119,20 +115,16 @@ Models are specified in `<provider>:<model>` format:
 aitran [options]
 ```
 
-Agentic translation workflow. The agent inspects, downloads, translates,
-reviews, and uploads translations on supported localization platforms
-with session-scoped approval controls at each write step. If `--prompt` is
-omitted, `aitran` starts an interactive REPL with persistent history and
-session management.
-
-**REPL commands:** `/help`, `/approve on|off|status`, `/resume [id]`, `/exit`
+Starts the orchestrator WebUI. The agent inspects, downloads, delegates
+translation and review to specialized subagents, and uploads translations on
+supported localization platforms with native approval controls at each write
+step.
 
 Examples:
 
 ```bash
 aitran
-aitran --prompt "translate Crowdin project MyApp to Chinese"
-aitran --resume --session-id abc123
+aitran --web-host 0.0.0.0 --web-port 9000
 ```
 
 Use `aitran --help` for the full list of options.
@@ -169,7 +161,7 @@ Use `aitran translate --help` for the full list of options.
 
 ### Observability
 
-Both `translate` and the top-level interactive app support distributed tracing via Logfire and
+Both `translate` and the top-level WebUI support distributed tracing via Logfire and
 MLflow.
 
 **Logfire:**
@@ -247,7 +239,7 @@ Example `dictionary-zh.json`:
 
 - **Agentic workflows** — agent-driven translation pipelines with plan-approve-execute pattern
 - **Deferred approval** — write operations require explicit confirmation before executing
-- **Interactive REPL** — multi-turn conversation with persistent history, auto-suggest, and session management
+- **Native WebUI** — multi-turn orchestration through Pydantic AI's built-in web frontend
 - **Streaming progress** — translations appear in real time with fuzzy flags
 - **Structured output** — Pydantic AI validates completeness, retries on format errors
 - **HTML preservation** — XML-escaping from the input format is automatically reversed

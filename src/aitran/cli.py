@@ -1,5 +1,6 @@
 """CLI entry point using click."""
 
+import json
 import sys
 from contextlib import contextmanager
 from importlib.resources import files
@@ -53,6 +54,7 @@ WEBLATE_UPLOAD_METHODS = [
     "add",
 ]
 WEBLATE_FUZZY_CHOICES = ["process", "approve"]
+WEBLATE_CONFLICT_CHOICES = ["ignore", "replace-translated", "replace-approved"]
 WEBLATE_DOWNLOAD_FORMATS = ["po", "xliff11", "xliff"]
 
 
@@ -225,11 +227,6 @@ def _observability(
 @click.group(context_settings=CONTEXT_SETTINGS, invoke_without_command=True)
 @click.version_option(message="%(prog)s %(version)s")
 @click.option(
-    "-p",
-    "--prompt",
-    help="Initial natural-language request for the interactive app.",
-)
-@click.option(
     "-m",
     "--model",
     "orchestrator_model",
@@ -311,25 +308,24 @@ def _observability(
     help="LLM temperature for translation/review tasks.",
 )
 @click.option(
-    "--session-id",
-    help="Session ID to resume or name a new session",
+    "--web-host",
+    envvar="AITRAN_WEB_HOST",
+    default="127.0.0.1",
+    show_default=True,
+    help="Host for the orchestrator WebUI server.",
 )
 @click.option(
-    "--resume",
-    is_flag=True,
-    help="Resume from a saved session",
-)
-@click.option(
-    "--auto-approve",
-    is_flag=True,
-    envvar="AITRAN_APP_AUTO_APPROVE",
-    help="Automatically approve tools that require confirmation.",
+    "--web-port",
+    envvar="AITRAN_WEB_PORT",
+    type=click.IntRange(min=1, max=65535),
+    default=7932,
+    show_default=True,
+    help="Port for the orchestrator WebUI server.",
 )
 @_observability_options
 @click.pass_context
 def app(
     ctx: click.Context,
-    prompt: str | None,
     orchestrator_model: str,
     orchestrator_key: str | None,
     orchestrator_host: str | None,
@@ -343,9 +339,8 @@ def app(
     translate_key: str | None,
     translate_host: str | None,
     translate_temperature: float,
-    session_id: str | None,
-    resume: bool,
-    auto_approve: bool,
+    web_host: str,
+    web_port: int,
     logfire: bool,
     logfire_capture_http: bool,
     mlflow: bool,
@@ -361,12 +356,8 @@ def app(
     if ctx.invoked_subcommand is not None:
         return
 
-    from rich.console import Console
-
-    from aitran.app import run_app
+    from aitran.app import run_web_app
     from aitran.toolsets._base import OrchestratorDeps
-
-    console = Console()
 
     with _observability(
         logfire=logfire,
@@ -386,17 +377,14 @@ def app(
             translate_api_host=translate_host,
             translate_temperature=translate_temperature,
         )
-        run_app(
-            prompt,
+        run_web_app(
             orchestrator_model=orchestrator_model,
             orchestrator_api_key=orchestrator_key,
             orchestrator_api_host=orchestrator_host,
             orchestrator_temperature=orchestrator_temperature,
             deps=deps,
-            session_id=session_id,
-            resume=resume,
-            auto_approve=auto_approve,
-            console=console,
+            web_host=web_host,
+            web_port=web_port,
         )
 
 
@@ -930,6 +918,13 @@ def weblate_download(
     type=click.Choice(WEBLATE_FUZZY_CHOICES),
     help="Fuzzy string handling",
 )
+@click.option(
+    "--conflicts",
+    type=click.Choice(WEBLATE_CONFLICT_CHOICES),
+    default="ignore",
+    show_default=True,
+    help="How to handle strings already translated in Weblate",
+)
 def weblate_upload(
     url: str,
     token: str,
@@ -937,6 +932,7 @@ def weblate_upload(
     file_path: str,
     method: str,
     fuzzy: str | None,
+    conflicts: str,
 ) -> None:
     """Upload a translation file to Weblate.
 
@@ -944,17 +940,18 @@ def weblate_upload(
         click.ClickException: If the upload fails.
     """
     try:
-        weblate_upload_translation(
+        result = weblate_upload_translation(
             url=url,
             token=token,
             object_path=object_path,
             file_path=file_path,
             method=method,
             fuzzy=fuzzy,
+            conflicts=conflicts,
         )
     except (TypeError, ValueError, WeblateException, RequestException) as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo("Upload complete.")
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
 
 @app.group("crowdin", context_settings=CONTEXT_SETTINGS)

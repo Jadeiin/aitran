@@ -66,6 +66,7 @@ class TestBuildReviewerAgent:
             expected_indices=(1, 2, 3),
         )
         result = agent.run_sync("review these", deps=deps)
+        assert deps.batch_retrieved is True
         assert len(result.output.units) == 2
         assert result.output.units[0].verdict == "revise"
         assert result.output.units[0].corrected == "fix"

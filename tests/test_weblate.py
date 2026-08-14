@@ -280,14 +280,20 @@ def test_weblate_upload_sets_method_and_fuzzy(tmp_path, monkeypatch):
     monkeypatch.setattr(weblate, "Weblate", _factory)
     monkeypatch.setattr(weblate, "Translation", _FakeTranslation)
 
-    weblate.upload_translation(
+    result = weblate.upload_translation(
         url="https://example.com",
         token="token",
         object_path="project/component/zh",
         file_path=str(upload_path),
         method="replace",
         fuzzy="process",
+        conflicts="replace-translated",
     )
 
     assert fake.last_object_path == "project/component/zh"
-    assert fake.translation.last_data == {"method": "replace", "fuzzy": "process"}
+    assert fake.translation.last_data == {
+        "method": "replace",
+        "conflicts": "replace-translated",
+        "fuzzy": "process",
+    }
+    assert result == {"ok": True}

@@ -3,14 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from pydantic_ai_backends import LocalBackend
+from dataclasses import dataclass
 
 
 @dataclass
@@ -36,15 +29,6 @@ class OrchestratorDeps:
     translate_api_key: str | None = None
     translate_api_host: str | None = None
     translate_temperature: float = 0.1
-
-    # File management backend
-    backend: LocalBackend | None = None
-
-    # Session persistence
-    session_dir: Path = field(default_factory=lambda: Path(".aitran/sessions"))
-
-    # Terminal reporter for tool outcome display (used by _reporting hooks).
-    tool_reporter: Callable[[str, str, bool], None] | None = None
 
 
 def summarize_list(items: list[dict], *, label: str, name_field: str = "name") -> str:

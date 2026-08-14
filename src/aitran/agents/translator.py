@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelRetry, format_as_xml
+from pydantic_ai import Agent, ModelRetry, RunContext, format_as_xml
 
 from aitran.agents._base import (
     build_unit_prompt_fields,
@@ -15,7 +15,6 @@ from aitran.agents._base import (
 )
 
 if TYPE_CHECKING:
-    from pydantic_ai import RunContext
     from pydantic_ai.models import Model
 
 # ---------------------------------------------------------------------------
@@ -117,7 +116,7 @@ class TranslationBatch(BaseModel):
 
 @dataclass
 class TranslationDeps:
-    """Per-run context injected into the translator agent at each batch."""
+    """Per-run context available to the translator subagent and its tools."""
 
     source_lang: str
     target_lang: str
@@ -125,6 +124,8 @@ class TranslationDeps:
     dict_entries: list[tuple[str, str]]
     expected_indices: tuple[int, ...]
     plural_tags: list[str] | None = None
+    batch_xml: str = ""
+    batch_retrieved: bool = False
 
 
 def build_translation_input_xml(
@@ -189,7 +190,7 @@ def build_translation_input_xml(
 
 
 def build_translator_agent(model: Model) -> Agent[TranslationDeps, TranslationBatch]:
-    """Build the translator agent.
+    """Build the tool-using translator subagent.
 
     Static `instructions` (system + user prompt) sit before any dynamic
     instructions, which lets Anthropic auto-place the cache breakpoint at the
@@ -208,13 +209,25 @@ def build_translator_agent(model: Model) -> Agent[TranslationDeps, TranslationBa
         retries={"output": 3},
     )
 
+    @agent.tool
+    def get_translation_batch(ctx: RunContext[TranslationDeps]) -> str:
+        """Retrieve the translation units assigned to this subagent run.
+
+        Returns:
+            XML containing the indexed source units and their metadata.
+        """
+        ctx.deps.batch_retrieved = True
+        return ctx.deps.batch_xml
+
     @agent.instructions
     def task_and_glossary(ctx: RunContext[TranslationDeps]) -> str:
         source_label = format_language_label(ctx.deps.source_lang)
         target_label = format_language_label(ctx.deps.target_lang)
         parts = [
             f"Translate from `{source_label}` to `{target_label}` "
-            f"(XPG/POSIX locale names used in Unix-like systems and GNU Gettext)."
+            f"(XPG/POSIX locale names used in Unix-like systems and GNU Gettext).",
+            "Call `get_translation_batch` before producing output. The translation "
+            "units are available only through that tool.",
         ]
         if ctx.deps.context:
             parts.append(f"File context: {ctx.deps.context}")

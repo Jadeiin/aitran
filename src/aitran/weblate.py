@@ -12,6 +12,7 @@ from wlc.client import Translation, Weblate
 _DOWNLOAD_FORMATS = {"po", "xliff11", "xliff"}
 _OUTPUT_FORMATS = {".po": "po", ".xliff": "xliff", ".xlf": "xliff"}
 _ALLOWED_EXTENSIONS = set(_OUTPUT_FORMATS)
+_UPLOAD_CONFLICTS = {"ignore", "replace-translated", "replace-approved"}
 
 
 def _normalize_weblate_api_url(url: str) -> str:
@@ -236,7 +237,8 @@ def upload_translation(
     file_path: str,
     method: str,
     fuzzy: str | None,
-) -> None:
+    conflicts: str = "ignore",
+) -> dict[str, Any]:
     """Upload a translation file to Weblate.
 
     Args:
@@ -246,12 +248,21 @@ def upload_translation(
         file_path: Local translation file path.
         method: Upload method (translate, replace, etc.).
         fuzzy: Optional handling for fuzzy strings.
+        conflicts: Handling for strings already translated in Weblate.
+
+    Returns:
+        Weblate upload result, including imported/skipped counts when provided.
 
     Raises:
         TypeError: If object path does not target a translation resource.
+        ValueError: If the file extension or conflicts mode is unsupported.
 
     """
     _ensure_translation_extension(file_path)
+    if conflicts not in _UPLOAD_CONFLICTS:
+        raise ValueError(
+            "conflicts must be ignore, replace-translated, or replace-approved."
+        )
     client = Weblate(key=token, url=_normalize_weblate_api_url(url))
     obj = client.get_object(object_path)
     if not isinstance(obj, Translation):
@@ -259,8 +270,8 @@ def upload_translation(
             "Weblate object path must point to a translation resource "
             "(<project>/<component>/<language>)."
         )
-    data: dict[str, str] = {"method": method}
+    data: dict[str, str] = {"method": method, "conflicts": conflicts}
     if fuzzy:
         data["fuzzy"] = fuzzy
     with open(file_path, "rb") as handle:
-        obj.upload(handle, **data)
+        return obj.upload(handle, **data)

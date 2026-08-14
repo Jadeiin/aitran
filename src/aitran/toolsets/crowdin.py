@@ -145,7 +145,7 @@ async def get_progress(  # noqa: RUF029, D417
     return summarize_progress(items)
 
 
-@crowdin_toolset.tool
+@crowdin_toolset.tool(requires_approval=True)
 async def download_translation(  # noqa: RUF029, D417
     ctx: RunContext[OrchestratorDeps],
     project: str,
@@ -179,7 +179,7 @@ async def download_translation(  # noqa: RUF029, D417
     return f"Downloaded to {output_path}"
 
 
-@crowdin_toolset.tool
+@crowdin_toolset.tool(requires_approval=True)
 async def upload_translation(  # noqa: RUF029, D417
     ctx: RunContext[OrchestratorDeps],
     project: str,

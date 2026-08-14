@@ -1,40 +1,27 @@
 """Orchestrator agent — coordinates translation workflows across platforms.
 
-Unlike the translator and reviewer agents (which are pure prompt→structured-output),
-the orchestrator uses tool calling to interact with Crowdin, Weblate, and the
-translation/review engines.  It follows a "propose → confirm → execute" pattern
-via pydantic-ai's Deferred Tools mechanism.
+The orchestrator uses tool calling to interact with Crowdin and Weblate and to
+delegate file work to the tool-using translator and reviewer subagents. Write
+operations use Pydantic AI's native deferred-tool approval mechanism.
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, RunContext
-from pydantic_ai.capabilities import (
-    AgentCapability,
-    HandleDeferredToolCalls,
-    PrefixTools,
-    Toolset,
-)
-from pydantic_ai_backends import ConsoleCapability
-from pydantic_ai_toolguard import PermissionRule, ToolGuard
+from pydantic_ai import Agent, DeferredToolRequests
+from pydantic_ai.capabilities import PrefixTools, Toolset
+from pydantic_ai_harness.subagents import SubAgent, SubAgents
 from translate.lang import data as lang_data
 
+from aitran.agents.workflows import (
+    build_review_workflow_agent,
+    build_translation_workflow_agent,
+)
 from aitran.toolsets._base import OrchestratorDeps
-from aitran.toolsets._reporting import build_reporting_hooks
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model
-    from pydantic_ai_toolguard.capability import (
-        ApprovalCallback as ToolApprovalCallback,
-    )
-
-DeferredHandler = Callable[
-    [RunContext[OrchestratorDeps], DeferredToolRequests],
-    DeferredToolResults | Awaitable[DeferredToolResults | None] | None,
-]
 
 SYSTEM_PROMPT = (
     "You are a translation workflow orchestrator. You help users translate "
@@ -63,6 +50,13 @@ Workflow guidelines:
    - Translate the file locally.
    - Review the translated file.
    - Upload the translated file back to the platform.
+   - Treat file paths as a strict pipeline: use each tool/subagent result's
+     `output_path` as the next step's `input_file` or upload `file_path`.
+   - Never infer the next path from a naming convention and never upload an earlier
+     pipeline input when a later `output_path` was returned.
+   - For Weblate uploads, use `conflicts=replace-translated` when the translated or
+     reviewed file corrects existing translations; keep `ignore` only when filling
+     previously untranslated strings.
 
 5. **Platform discipline**:
    - For Crowdin projects, use Crowdin tools.
@@ -72,8 +66,15 @@ Workflow guidelines:
 6. **File format constraints**:
    - Downloaded translation files must use supported translation suffixes only:
      `.po`, `.xliff`, or `.xlf`.
-   - `translate_file` and `review_translated_file` only support PO/XLIFF files or
-     directories containing those files.
+   - Delegate local file work with `delegate_task`: choose `translator` for
+     translation and `reviewer` for review. Give the subagent a self-contained JSON
+     task containing all arguments it needs.
+   - Translator task keys are `input_file`, `output_file`, `source_language`,
+     `target_language`, `context_file`, `batch_size`, `jobs`, `order`, and `profile`.
+   - Reviewer task keys are `input_file`, `output_file`, `source_language`,
+     `target_language`, `batch_size`, `strict`, and `auto_fix`.
+   - The translator and reviewer only support PO/XLIFF files or directories
+     containing those files.
    - Do not download JSON, YAML, or other native source formats for this workflow.
    - For Weblate downloads, prefer `.po` when both PO and XLIFF are available because
      support is best.
@@ -81,8 +82,7 @@ Workflow guidelines:
      desired translation format so the backend can infer the correct export format.
 
 7. **Language codes**:
-   - Use Translate Toolkit language codes exactly when calling `translate_file` or
-     `review_translated_file`.
+   - Use Translate Toolkit language codes exactly in translator and reviewer tasks.
    - Do not guess alternate spellings after approval if a valid toolkit code is
      already available from the user or platform metadata.
    - Supported Translate Toolkit codes: {supported_codes}
@@ -105,101 +105,53 @@ def _build_orchestrator_system_prompt() -> str:
     return SYSTEM_PROMPT + "\n\n" + USER_PROMPT.format(supported_codes=supported_codes)
 
 
+class _ApprovalRequiredSubAgents(SubAgents[OrchestratorDeps]):
+    """Expose Harness delegation through native deferred-tool approval."""
+
+    def get_toolset(self):
+        """Wrap the Harness delegate tool so the WebUI approves each workflow.
+
+        Returns:
+            Approval-gated delegate toolset, or none when no subagents exist.
+        """
+        toolset = super().get_toolset()
+        return toolset.approval_required() if toolset is not None else None
+
+
 def build_orchestrator_agent(
     model: Model,
     *,
-    deferred_handler: DeferredHandler | None = None,
-    on_approval: ToolApprovalCallback | None = None,
-    extra_capabilities: list[AgentCapability[OrchestratorDeps]] | None = None,
+    worker_model: Model | None = None,
 ) -> Agent[OrchestratorDeps, str | DeferredToolRequests]:
     """Build the orchestrator agent with all toolsets.
 
     Args:
         model: Pydantic AI model instance for the orchestrator.
-        deferred_handler: Handler for deferred tool calls (approval flow).
-            When provided, the agent uses HandleDeferredToolCalls to resolve
-            approvals inline, so the run returns a plain string.
-        on_approval: Callback for ToolGuard approval-gated tools.
-            Receives (tool_name, permission_rule), returns True to approve.
-        extra_capabilities: Additional capabilities inserted before ToolGuard.
-            Used for hooks that need to run before approval checks.
+        worker_model: Model used by translation and review workflow subagents.
+            Defaults to the orchestrator model.
 
     Returns:
         Configured orchestrator agent.
     """
-    from aitran.toolsets import crowdin_toolset, translate_toolset, weblate_toolset
+    from aitran.toolsets import crowdin_toolset, weblate_toolset
 
-    guard = ToolGuard(
-        on_approval=on_approval,
-        rules=[
-            # Crowdin/Weblate write operations need approval
-            PermissionRule(
-                tool_pattern="crowdin_download_translation",
-                action="allow",
-                requires_approval=True,
-            ),
-            PermissionRule(
-                tool_pattern="crowdin_upload_translation",
-                action="allow",
-                requires_approval=True,
-            ),
-            PermissionRule(
-                tool_pattern="weblate_download_translation",
-                action="allow",
-                requires_approval=True,
-            ),
-            PermissionRule(
-                tool_pattern="weblate_upload_translation",
-                action="allow",
-                requires_approval=True,
-            ),
-            # Translate/review need approval
-            PermissionRule(
-                tool_pattern="translate_file",
-                action="allow",
-                requires_approval=True,
-            ),
-            PermissionRule(
-                tool_pattern="review_translated_file",
-                action="allow",
-                requires_approval=True,
-            ),
-            # Read-only tools — allow without approval
-            PermissionRule(tool_pattern="crowdin_*", action="allow"),
-            PermissionRule(tool_pattern="weblate_*", action="allow"),
-            # Console/file tools — read-only allow, write/edit need approval
-            PermissionRule(tool_pattern="read_file", action="allow"),
-            PermissionRule(tool_pattern="ls", action="allow"),
-            PermissionRule(tool_pattern="glob", action="allow"),
-            PermissionRule(tool_pattern="grep", action="allow"),
-            PermissionRule(
-                tool_pattern="write_file",
-                action="allow",
-                requires_approval=True,
-            ),
-            PermissionRule(
-                tool_pattern="edit_file",
-                action="allow",
-                requires_approval=True,
-            ),
-            # No wildcard deny rule needed — ToolGuard's default is deny.
-        ],
+    worker_model = worker_model or model
+    translator = build_translation_workflow_agent(worker_model)
+    reviewer = build_review_workflow_agent(worker_model)
+
+    subagents = _ApprovalRequiredSubAgents(
+        agents=[SubAgent(translator), SubAgent(reviewer)],
+        agent_folders=None,
+        forward_usage=True,
+        inherit_tools=False,
+        contain_errors=True,
     )
 
-    reporting_hooks = build_reporting_hooks()
-    capabilities: list[AgentCapability[OrchestratorDeps]] = [
+    capabilities = [
         PrefixTools(wrapped=Toolset(crowdin_toolset), prefix="crowdin"),
         PrefixTools(wrapped=Toolset(weblate_toolset), prefix="weblate"),
-        Toolset(translate_toolset),
-        *(extra_capabilities or []),
-        guard,
-        ConsoleCapability(include_execute=False),
-        reporting_hooks,  # type: ignore[arg-type]
+        subagents,
     ]
-    if deferred_handler is not None:
-        capabilities.append(
-            HandleDeferredToolCalls[OrchestratorDeps](handler=deferred_handler)
-        )
 
     return Agent(
         model,

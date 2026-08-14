@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from aitran.toolsets._base import OrchestratorDeps
@@ -25,7 +26,9 @@ async def test_translate_file_passes_silent_progress(monkeypatch, tmp_path):
     ctx = SimpleNamespace(deps=OrchestratorDeps())
     result = await translate_file(ctx, str(path), source_lang="en", target_lang="zh_CN")
 
-    assert result == f"Translated PO file: {path}"
+    payload = json.loads(result)
+    assert payload["input_path"] == str(path)
+    assert payload["output_path"] == str(path)
     assert calls[0]["progress"] is _SILENT_PROGRESS
     assert calls[0]["verbose"] is False
     assert calls[0]["output_path"] == str(path)
@@ -51,7 +54,10 @@ async def test_review_translated_file_passes_silent_progress(monkeypatch, tmp_pa
         auto_fix=True,
     )
 
-    assert '"pass": 1' in result
+    payload = json.loads(result)
+    assert payload["summary"]["pass"] == 1
+    assert payload["input_path"] == str(path)
+    assert payload["output_path"] == str(path)
     assert calls[0]["progress"] is _SILENT_PROGRESS
     assert calls[0]["auto_fix"] is True
 
@@ -67,12 +73,13 @@ async def test_translate_file_forwards_tool_options(monkeypatch, tmp_path):
     monkeypatch.setattr("aitran.toolsets.translate.translate_po", fake_translate_po)
 
     ctx = SimpleNamespace(deps=OrchestratorDeps())
-    await translate_file(
+    output_path = str(tmp_path / "out.po")
+    result = await translate_file(
         ctx,
         str(path),
         source_lang="en",
         target_lang="zh_CN",
-        output_path=str(tmp_path / "out.po"),
+        output_path=output_path,
         context_file=str(tmp_path / "context.txt"),
         batch_size=7,
         order="reference",
@@ -84,6 +91,7 @@ async def test_translate_file_forwards_tool_options(monkeypatch, tmp_path):
     assert calls[0]["batch_size"] == 7
     assert calls[0]["order"] == "reference"
     assert calls[0]["profile"] == "fast"
+    assert json.loads(result)["output_path"] == output_path
 
 
 async def test_review_translated_file_forwards_strict_and_batch_size(
@@ -100,14 +108,18 @@ async def test_review_translated_file_forwards_strict_and_batch_size(
     monkeypatch.setattr("aitran.toolsets.translate.review_file", fake_review_file)
 
     ctx = SimpleNamespace(deps=OrchestratorDeps())
-    await review_translated_file(
+    output_path = str(tmp_path / "reviewed.po")
+    result = await review_translated_file(
         ctx,
         str(path),
         batch_size=9,
         strict=True,
-        output_path=str(tmp_path / "reviewed.po"),
+        output_path=output_path,
     )
 
     assert calls[0]["batch_size"] == 9
     assert calls[0]["strict"] is True
-    assert calls[0]["output_path"] == str(tmp_path / "reviewed.po")
+    assert calls[0]["output_path"] == output_path
+    payload = json.loads(result)
+    assert payload["input_path"] == str(path)
+    assert payload["output_path"] == output_path

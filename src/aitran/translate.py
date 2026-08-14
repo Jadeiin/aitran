@@ -412,16 +412,17 @@ async def _translate_batch(
     Returns:
         List of TranslatedUnit aligned with the input units list.
     """
-    user_msg = build_translation_input_xml(
+    deps.batch_xml = build_translation_input_xml(
         units,
         start_index,
         profile=profile,
         plural_tags=deps.plural_tags,
     )
+    deps.batch_retrieved = False
     seen: set[int] = set()
 
     async with agent.run_stream(
-        user_msg,
+        "Translate the assigned batch. Retrieve it with your batch tool first.",
         deps=deps,
         message_history=history,
     ) as run:

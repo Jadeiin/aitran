@@ -43,18 +43,16 @@ dependencies = [
     "translate-toolkit>=3.14",
     "click>=8.1",
     "platformdirs>=4.0",
-    "pydantic-ai-slim[anthropic,openai,retries]>=1.0",
+    "pydantic-ai-slim[anthropic,openai,retries,web]>=2.0",
+    "pydantic-ai-harness>=0.13,<0.14",
     "rich>=13.0",
-    "prompt-toolkit>=3.0",
     "wlc>=2.0.0",
     "crowdin-api-client>=1.26.0",
     "autocorrect-py>=2.14.0",
-    "pydantic-ai-backend[console]>=0.2.9",
-    "pydantic-ai-toolguard>=0.1.0",
 ]
 
 [project.optional-dependencies]
-logfire = ["pydantic-ai-slim[logfire]>=1.0"]
+logfire = ["pydantic-ai-slim[logfire]>=2.0"]
 mlflow = ["mlflow-tracing>=3.1"]
 
 [project.scripts]
