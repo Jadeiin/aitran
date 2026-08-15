@@ -4,6 +4,44 @@ import pytest
 from click.testing import CliRunner
 
 from aitran import cli
+from aitran.agent_work import BatchProgress
+
+
+def test_headless_progress_is_written_to_stderr(capsys):
+    with cli._progress_reporter() as report:
+        report(
+            "messages.po",
+            BatchProgress(accepted=25, total=100, remaining=75, complete=False),
+        )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "messages.po" in captured.err
+    assert "25%" in captured.err
+    assert "25/100" in captured.err
+
+
+def test_headless_progress_keeps_one_rich_task_per_file(capsys):
+    with cli._progress_reporter() as report:
+        report(
+            "first.po",
+            BatchProgress(accepted=1, total=2, remaining=1, complete=False),
+        )
+        report(
+            "second.po",
+            BatchProgress(accepted=1, total=3, remaining=2, complete=False),
+        )
+        report(
+            "first.po",
+            BatchProgress(accepted=2, total=2, remaining=0, complete=True),
+        )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.count("first.po") == 1
+    assert captured.err.count("second.po") == 1
+    assert "2/2" in captured.err
+    assert "1/3" in captured.err
 
 
 def test_translate_command_enables_logfire(monkeypatch, tmp_path):
@@ -25,14 +63,15 @@ def test_translate_command_enables_logfire(monkeypatch, tmp_path):
     def fake_flush_mlflow(*, enabled):
         calls.append(("flush_mlflow", enabled))
 
-    def fake_translate_po(**kwargs):
-        calls.append(("translate_po", kwargs["po_path"]))
+    def fake_translate_file(**kwargs):
+        calls.append(("translate_file", kwargs["input_path"]))
+        return {"output_path": kwargs["output_path"]}
 
     monkeypatch.setattr(cli, "setup_logfire", fake_setup_logfire)
     monkeypatch.setattr(cli, "flush_logfire", fake_flush_logfire)
     monkeypatch.setattr(cli, "setup_mlflow", fake_setup_mlflow)
     monkeypatch.setattr(cli, "flush_mlflow", fake_flush_mlflow)
-    monkeypatch.setattr(cli, "translate_po", fake_translate_po)
+    monkeypatch.setattr(cli, "translate_file", fake_translate_file)
 
     result = CliRunner().invoke(
         cli.app,
@@ -51,7 +90,7 @@ def test_translate_command_enables_logfire(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert calls[0] == ("setup_logfire", True, True)
     assert calls[1] == ("setup_mlflow", False, None, None)
-    assert calls[2] == ("translate_po", str(po_file))
+    assert calls[2] == ("translate_file", str(po_file))
     assert calls[3] == ("flush_logfire", True)
     assert calls[4] == ("flush_mlflow", False)
 
@@ -75,14 +114,15 @@ def test_translate_command_enables_mlflow(monkeypatch, tmp_path):
     def fake_flush_mlflow(*, enabled):
         calls.append(("flush_mlflow", enabled))
 
-    def fake_translate_po(**kwargs):
-        calls.append(("translate_po", kwargs["po_path"]))
+    def fake_translate_file(**kwargs):
+        calls.append(("translate_file", kwargs["input_path"]))
+        return {"output_path": kwargs["output_path"]}
 
     monkeypatch.setattr(cli, "setup_logfire", fake_setup_logfire)
     monkeypatch.setattr(cli, "flush_logfire", fake_flush_logfire)
     monkeypatch.setattr(cli, "setup_mlflow", fake_setup_mlflow)
     monkeypatch.setattr(cli, "flush_mlflow", fake_flush_mlflow)
-    monkeypatch.setattr(cli, "translate_po", fake_translate_po)
+    monkeypatch.setattr(cli, "translate_file", fake_translate_file)
 
     result = CliRunner().invoke(
         cli.app,
@@ -105,7 +145,7 @@ def test_translate_command_enables_mlflow(monkeypatch, tmp_path):
     assert calls[0][0] == "setup_logfire"
     assert calls[0][2] is False
     assert calls[1] == ("setup_mlflow", True, "http://localhost:5000", "aitran-test")
-    assert calls[2] == ("translate_po", str(po_file))
+    assert calls[2] == ("translate_file", str(po_file))
     assert calls[3][0] == "flush_logfire"
     assert calls[4] == ("flush_mlflow", True)
 
@@ -172,6 +212,10 @@ def test_top_level_app_reads_app_envvars(monkeypatch):
             "AITRAN_APP_TMP": "0.4",
             "AITRAN_WEB_HOST": "0.0.0.0",
             "AITRAN_WEB_PORT": "8123",
+            "AITRAN_TRANSLATOR_MODEL": "anthropic:translator",
+            "AITRAN_TRANSLATOR_KEY": "translator-key",
+            "AITRAN_REVIEWER_MODEL": "openai:reviewer",
+            "AITRAN_REVIEWER_KEY": "reviewer-key",
         },
     )
 
@@ -183,3 +227,7 @@ def test_top_level_app_reads_app_envvars(monkeypatch):
     assert call["orchestrator_temperature"] == pytest.approx(0.4)
     assert call["web_host"] == "0.0.0.0"
     assert call["web_port"] == 8123
+    assert call["deps"].translate_model == "anthropic:translator"
+    assert call["deps"].translate_api_key == "translator-key"
+    assert call["deps"].review_model == "openai:reviewer"
+    assert call["deps"].review_api_key == "reviewer-key"

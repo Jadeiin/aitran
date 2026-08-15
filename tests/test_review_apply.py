@@ -103,6 +103,7 @@ class TestPoReviewApply:
             ReviewedUnit(
                 index=1,
                 verdict="revise",
+                corrected="您好",
                 note="check punctuation",
             )
         ]

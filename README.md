@@ -1,7 +1,7 @@
 # aitran
 
 Agentic translation workflows for localization platforms, plus direct
-PO/XLIFF translation — streaming progress, deferred approval, and
+PO/XLIFF translation with bounded tool retrieval, deferred approval, and
 translator notes for human review.
 Successor to [gpt-po](https://github.com/ryanhex53/gpt-po).
 
@@ -43,15 +43,17 @@ aitran -m openai:gpt-5.4-mini --web-host 0.0.0.0 --web-port 9000
 ```
 
 The orchestrator uses Pydantic AI Harness `SubAgents` to delegate isolated,
-self-contained tasks to the translator and reviewer. It uses a separate model (default
-`deepseek:deepseek-v4-pro`) from the translation/review sub-tasks
-(default `deepseek:deepseek-v4-flash`), so you can pair a capable
-planner with a fast translator.
+self-contained tasks directly to the translator and reviewer. The orchestrator,
+translator, and reviewer can use separate models; reviewer settings fall back to
+translator settings when omitted.
 
 Write operations (download, translation delegation, review delegation, upload)
 use Pydantic AI's native deferred-tool approval in the WebUI. Translator and
 reviewer subagents retrieve their assigned PO/XLIFF batches through tools;
 translation entries are not injected into the orchestrator conversation.
+
+Headless `translate` and `review` commands consume the same native Agent tool
+events and render one Rich progress row per file as batches are written.
 
 ### Direct translation
 
@@ -68,11 +70,14 @@ aitran translate --po-dir ./locales -l zh
 # Translate an XLIFF file
 aitran translate --xliff en_zh-CN.xliff -src en -l zh
 
-# Verbose mode — see each translation as it completes
+# Verbose mode — print the completed artifact JSON
 aitran translate --po zh_Hans.po -v
 
 # Custom API host (for OpenAI-compatible gateways)
 aitran translate --po zh_Hans.po --host https://your-gateway.example.com
+
+# Free-form product/domain guidance is separate from the fast/full metadata profile
+aitran translate --po zh_Hans.po --instructions "Mobile UI; keep product names"
 ```
 
 Models are specified in `<provider>:<model>` format:
@@ -90,6 +95,14 @@ Models are specified in `<provider>:<model>` format:
 | `AITRAN_APP_KEY` | API key for the orchestrator model |
 | `AITRAN_APP_HOST` | Custom API base URL for the orchestrator model |
 | `AITRAN_APP_TMP` | Orchestrator LLM temperature (default: `0.5`) |
+| `AITRAN_TRANSLATOR_MODEL` | Translator model (falls back to `AITRAN_MODEL`) |
+| `AITRAN_TRANSLATOR_KEY` | Translator API key (falls back to `AITRAN_API_KEY`) |
+| `AITRAN_TRANSLATOR_HOST` | Translator API base URL (falls back to `AITRAN_API_HOST`) |
+| `AITRAN_TRANSLATOR_TMP` | Translator temperature (falls back to `AITRAN_MODEL_TMP`) |
+| `AITRAN_REVIEWER_MODEL` | Reviewer model (falls back to translator model) |
+| `AITRAN_REVIEWER_KEY` | Reviewer API key (falls back to translator key) |
+| `AITRAN_REVIEWER_HOST` | Reviewer API base URL (falls back to translator host) |
+| `AITRAN_REVIEWER_TMP` | Reviewer temperature (falls back to translator temperature) |
 | `AITRAN_WEB_HOST` | WebUI bind host (default: `127.0.0.1`) |
 | `AITRAN_WEB_PORT` | WebUI bind port (default: `7932`) |
 | `AITRAN_API_KEY` / `OPENAI_API_KEY` | API key |
@@ -240,8 +253,9 @@ Example `dictionary-zh.json`:
 - **Agentic workflows** — agent-driven translation pipelines with plan-approve-execute pattern
 - **Deferred approval** — write operations require explicit confirmation before executing
 - **Native WebUI** — multi-turn orchestration through Pydantic AI's built-in web frontend
-- **Streaming progress** — translations appear in real time with fuzzy flags
-- **Structured output** — Pydantic AI validates completeness, retries on format errors
+- **Bounded retrieval** — translator/reviewer Agents pull pages by both unit and character budgets
+- **Headless progress** — concurrent files update independent Rich progress rows without polluting artifact output
+- **Structured tool contracts** — Pydantic validates batch identity, completeness, plural counts, and artifact paths
 - **HTML preservation** — XML-escaping from the input format is automatically reversed
 - **Fuzzy marking** — uncertain translations are flagged for reviewer attention
 - **Translator notes** — optional remarks from the model aid human review

@@ -24,11 +24,17 @@ class OrchestratorDeps:
     weblate_url: str | None = None
     weblate_token: str | None = None
 
-    # Model config for translate/review sub-tasks
+    # Translator model config
     translate_model: str = "deepseek:deepseek-v4-flash"
     translate_api_key: str | None = None
     translate_api_host: str | None = None
     translate_temperature: float = 0.1
+
+    # Reviewer overrides; unset fields inherit the translator configuration.
+    review_model: str | None = None
+    review_api_key: str | None = None
+    review_api_host: str | None = None
+    review_temperature: float | None = None
 
 
 def summarize_list(items: list[dict], *, label: str, name_field: str = "name") -> str:

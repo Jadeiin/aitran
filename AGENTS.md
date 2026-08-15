@@ -13,7 +13,7 @@ uv run ruff check --fix                # lint + auto-fix
 uv run ruff format                     # format
 
 uvx prek install                       # install pre-commit hooks (uses `prek`, NOT `pre-commit`)
-uv run aitran --po file.po -l zh       # run the CLI
+uv run aitran translate --po file.po -l zh  # run headless translation
 uv run aitran                          # launch the orchestrator WebUI
 uv run aitran --web-host 0.0.0.0 --web-port 9000
 ```
@@ -38,10 +38,11 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 - `app.py` — thin `Agent.to_web()` + Uvicorn adapter for the orchestrator WebUI
 - `agents/` — pydantic-ai agent definitions:
   - `_base.py` — model routing (`build_model`) and shared prompt helpers
-  - `translator.py` — translator agent (`build_translator_agent`), output types (`TranslatedUnit` / `TranslationBatch`), prompts
-  - `reviewer.py` — reviewer agent (`build_reviewer_agent`), output types (`ReviewedUnit` / `ReviewBatch`)
-  - `workflows.py` — translation/review workflow subagents delegated through Pydantic AI Harness
-- `translate.py` — batch translation loop with streaming via `rich` progress bars; `PoTranslator` and `XliffTranslator` adapter classes handle format-specific parse/filter/apply/save
+  - `translator.py` — complete-file translator Agent delegated directly through Pydantic AI Harness
+  - `reviewer.py` — complete-file reviewer Agent delegated directly through Pydantic AI Harness
+- `agent_work.py` — run-local paginated retrieval/submission toolsets and artifact contracts for translator/reviewer Agents
+- `headless.py` — thin direct-Agent adapter for the headless translate/review commands
+- `translate.py` — `PoTranslator` and `XliffTranslator` document adapters for format-specific parse/filter/apply/save
 - `dicts.py` — glossary lookup with cascading config discovery (CWD → git root → XDG dir)
 - `manipulate.py` — PO entry removal by filter (fuzzy, obsolete, regex reference match)
 - `sync.py` — update PO from POT preserving existing translations
@@ -51,11 +52,15 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 
 ### Data flow
 
-1. CLI parses args → calls `translate_po` / `translate_xliff_file`
-2. Adapter parses file, filters units needing translation
-3. `_run_translation_async` batches units by accumulated char length (`--context-length`, default 4096)
-4. Each batch: the format-specific input builder serializes units into agent deps → translator/reviewer calls its retrieval tool → agent streams results → translate-toolkit entity decoding reverses XML escaping → adapter applies results through format APIs and saves
-5. Progress rendered via `rich.progress.Progress` with per-unit verbose output
+1. WebUI orchestrator delegates one canonical JSON file task directly to the translator or reviewer Agent; headless commands run the same Agents directly.
+2. A fresh run-local toolset parses the document, selects stable unit IDs, and exposes one bounded page at a time.
+3. The Agent retrieves and submits each page; the toolset validates IDs/plurals, applies results through the format adapter, and saves after every accepted page.
+4. The initial task remains in Agent history while pages contain only current batch data; `finish_translation` / `finish_review` returns the exact output artifact JSON.
+5. Headless commands consume native `FunctionToolResultEvent` events and update one Rich stderr progress row per file from each accepted page's `BatchProgress`.
+
+Delegated task JSON uses `instructions` for free-form domain, tone, terminology,
+or product guidance. `profile` is strictly `fast` or `full` and controls only
+retrieved unit metadata detail; never put prose in `profile`, `scope`, or `order`.
 
 ### Model routing
 
@@ -67,7 +72,7 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 - Bind options: `--web-host`, `--web-port`
 - Environment uses `AITRAN_APP_*` model settings plus `AITRAN_WEB_HOST` / `AITRAN_WEB_PORT`
 - Write tools and Harness delegation use native deferred approval; do not reintroduce a separate toolguard layer
-- Harness `SubAgents` must use `agent_folders=None` and `inherit_tools=False` so only explicit workflow agents are loaded and platform tools are not inherited
+- Harness `SubAgents` must use `agent_folders=None` and `inherit_tools=False` so only the explicit translator/reviewer Agents are loaded and platform tools are not inherited
 
 ## Conventions & Gotchas
 
@@ -80,8 +85,8 @@ Single-package CLI at `src/aitran/`. Entry point: `aitran = "aitran.cli:app"` (C
 - **API host gets `/v1` appended**: In `translate.py:304`, a custom `--host` gets `rstrip("/") + "/v1"` appended automatically.
 - **User dictionaries**: Looked up in order: `$CWD/.aitran/` → git root `.aitran/` → XDG user config dir (`platformdirs`). Named `dictionary-<lang>.json`.
 - **Commitizen**: Conventional commits with `tag_format = "v$version"`, `major_version_zero = true`.
-- **Output validation**: Agent validates index completeness via `@agent.output_validator` — missing/extra indices trigger `ModelRetry` (up to 3 retries).
+- **Output validation**: submit tools validate batch identity and index completeness; invalid submissions raise `ModelRetry`. Agent output validators require the corresponding finish tool artifact.
 - **Plural handling**: `TranslatedUnit.targets` is always a list — length 1 for singular, length matching `plural_tags` for plural units. PO plural sources are passed via `sources` list in prompt XML; `plural_tags` (e.g. `["one", "other"]`) is injected via task instructions.
-- **HTML/XML escaping**: `format_as_xml` escapes `<>&` in source text when building the prompt XML. `_decode_serialized_markup()` in `translate.py` conditionally reverses this by decoding only entities (`&amp;`, `&lt;`, `&gt;`) whose corresponding characters appeared in the original source. The prompt also explicitly instructs the LLM not to escape output. Both layers exist because LLMs are unreliable at following XML-escaping instructions.
+- **HTML/XML escaping**: Pydantic AI serializes tool payloads safely. `_decode_serialized_markup()` in `translate.py` conditionally reverses model-returned entities (`&amp;`, `&lt;`, `&gt;`) only when the corresponding character appeared in the original source.
 - **XLIFF mutation**: Do not edit XLIFF XML nodes manually when applying translations. Use `xliffunit.settarget()`, `marktranslated()`, `markreviewneeded()`, and note APIs so translate-toolkit owns node creation, XML-safe text, and state mapping.
 - **Rate limiting**: HTTP 429 triggers a 20-second sleep before retry. Timeouts (408/504) retry immediately.

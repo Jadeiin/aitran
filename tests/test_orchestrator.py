@@ -1,6 +1,6 @@
 """Tests for orchestrator prompt construction."""
 
-from pydantic_ai import DeferredToolRequests, DeferredToolResults
+from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, RunContext
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
@@ -23,6 +23,9 @@ def test_orchestrator_prompt_mentions_supported_formats_and_codes():
     assert "When calling download tools" in prompt
     assert "Supported Translate Toolkit codes:" in prompt
     assert "zh_CN" in prompt
+    assert '"profile": "fast" | "full"' in prompt
+    assert '"instructions": string' in prompt
+    assert "Never place free-form" in prompt
 
 
 async def test_orchestrator_exposes_approved_harness_delegation_tool():
@@ -58,13 +61,21 @@ async def test_orchestrator_exposes_approved_harness_delegation_tool():
 
 
 async def test_approved_harness_delegation_forwards_parent_deps(monkeypatch):
-    from aitran.agents import workflows
+    from aitran.agents import orchestrator
 
     received_deps = []
 
-    async def fake_translate(ctx, **_kwargs):  # noqa: RUF029
+    child = Agent(
+        TestModel(),
+        name="translator",
+        description="test translator",
+        deps_type=OrchestratorDeps,
+    )
+
+    @child.instructions
+    def capture_deps(ctx: RunContext[OrchestratorDeps]) -> str:
         received_deps.append(ctx.deps)
-        return "translated"
+        return "Return translated."
 
     async def respond(messages, _agent_info):  # noqa: RUF029
         if any(
@@ -77,12 +88,14 @@ async def test_approved_harness_delegation_forwards_parent_deps(monkeypatch):
             parts=[
                 ToolCallPart(
                     "delegate_task",
-                    {"agent_name": "translator", "task": '{"path": "messages.po"}'},
+                    {"agent_name": "translator", "task": "translate messages.po"},
                 )
             ]
         )
 
-    monkeypatch.setattr(workflows, "translate_file", fake_translate)
+    monkeypatch.setattr(
+        orchestrator, "build_translation_file_agent", lambda _model: child
+    )
     deps = OrchestratorDeps()
     agent = build_orchestrator_agent(
         FunctionModel(function=respond),

@@ -32,13 +32,27 @@ def build_web_app(
         base_url=fmt_base_url(orchestrator_api_host),
         temperature=orchestrator_temperature,
     )
-    worker = build_model(
+    translator = build_model(
         deps.translate_model,
         api_key=deps.translate_api_key,
         base_url=fmt_base_url(deps.translate_api_host),
         temperature=deps.translate_temperature,
     )
-    agent = build_orchestrator_agent(orchestrator, worker_model=worker)
+    reviewer = build_model(
+        deps.review_model or deps.translate_model,
+        api_key=deps.review_api_key or deps.translate_api_key,
+        base_url=fmt_base_url(deps.review_api_host or deps.translate_api_host),
+        temperature=(
+            deps.review_temperature
+            if deps.review_temperature is not None
+            else deps.translate_temperature
+        ),
+    )
+    agent = build_orchestrator_agent(
+        orchestrator,
+        translator_model=translator,
+        reviewer_model=reviewer,
+    )
     return agent.to_web(deps=deps)
 
 

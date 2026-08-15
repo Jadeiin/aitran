@@ -1,7 +1,7 @@
 [project]
 name = "aitran"
 version = "0.4.1"
-description = "Agentic translation workflows for localization platforms, plus direct PO/XLIFF translation — streaming progress, deferred approval, and translator notes for human review"
+description = "Agentic translation workflows for localization platforms, plus direct PO/XLIFF translation with bounded retrieval and review"
 readme = "README.md"
 license = "GPL-2.0-or-later"
 license-files = ["LICENSE"]
@@ -43,7 +43,7 @@ dependencies = [
     "translate-toolkit>=3.14",
     "click>=8.1",
     "platformdirs>=4.0",
-    "pydantic-ai-slim[anthropic,openai,retries,web]>=2.0",
+    "pydantic-ai-slim[anthropic,openai,retries,web]>=2.30,<3",
     "pydantic-ai-harness>=0.13,<0.14",
     "rich>=13.0",
     "wlc>=2.0.0",
@@ -52,7 +52,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-logfire = ["pydantic-ai-slim[logfire]>=2.0"]
+logfire = ["pydantic-ai-slim[logfire]>=2.30,<3"]
 mlflow = ["mlflow-tracing>=3.1"]
 
 [project.scripts]

@@ -1,91 +1,46 @@
-"""Tests for the reviewer agent."""
+"""Tests for reviewer result constraints."""
 
-from pydantic_ai.models.test import TestModel
+import pytest
+from pydantic import ValidationError
 
-from aitran.agents.reviewer import (
-    ReviewBatch,
-    ReviewDeps,
-    ReviewedUnit,
-    build_review_input_xml,
-    build_reviewer_agent,
-)
-from aitran.qa import UnitQAReport
-from tests.helpers import po_parse as _po
+from aitran.agent_work import ReviewResult, ReviewTask, TranslationTask
 
 
-class TestReviewedUnit:
-    def test_revise_with_correction(self):
-        unit = ReviewedUnit(
-            index=1,
-            verdict="revise",
-            corrected="你好 %s",
-            note="missing placeholder",
-        )
-        assert unit.corrected == "你好 %s"
-
-    def test_reject_without_correction(self):
-        unit = ReviewedUnit(
-            index=1, verdict="reject", note="meaning is completely wrong"
-        )
-        assert unit.corrected is None
+def test_revise_requires_corrected_text():
+    with pytest.raises(ValidationError, match="require corrected"):
+        ReviewResult(index=1, verdict="revise")
 
 
-class TestReviewBatch:
-    def test_batch_roundtrip(self):
-        batch = ReviewBatch(
-            units=[
-                ReviewedUnit(index=2, verdict="revise", corrected="fixed"),
-                ReviewedUnit(index=3, verdict="reject"),
-            ]
-        )
-        assert len(batch.units) == 2
-        assert batch.units[0].verdict == "revise"
-        assert batch.units[0].corrected == "fixed"
+def test_reject_can_require_human_retranslation():
+    result = ReviewResult(index=1, verdict="reject", note="needs product context")
+    assert result.corrected is None
 
 
-class TestBuildReviewerAgent:
-    def test_agent_name(self):
-        model = TestModel()
-        agent = build_reviewer_agent(model)
-        assert agent.name == "aitran-reviewer"
+def test_file_tasks_separate_profile_from_free_form_instructions():
+    translation = TranslationTask.model_validate({
+        "input_path": "messages.po",
+        "output_path": "translated.po",
+        "profile": "full",
+        "instructions": "Use established mobile application terminology.",
+    })
+    review = ReviewTask.model_validate({
+        "input_path": "translated.po",
+        "output_path": "reviewed.po",
+        "instructions": "Prefer concise UI wording.",
+    })
 
-    def test_agent_runs_with_test_model(self):
-        model = TestModel(
-            custom_output_args={
-                "units": [
-                    {"index": 2, "verdict": "revise", "corrected": "fix"},
-                    {"index": 3, "verdict": "reject", "note": "bad"},
-                ]
-            }
-        )
-        agent = build_reviewer_agent(model)
-        deps = ReviewDeps(
-            source_lang="en",
-            target_lang="zh_CN",
-            context="UI strings",
-            expected_indices=(1, 2, 3),
-        )
-        result = agent.run_sync("review these", deps=deps)
-        assert deps.batch_retrieved is True
-        assert len(result.output.units) == 2
-        assert result.output.units[0].verdict == "revise"
-        assert result.output.units[0].corrected == "fix"
+    assert translation.profile == "full"
+    assert translation.instructions.startswith("Use established")
+    assert review.instructions == "Prefer concise UI wording."
 
 
-class TestBuildReviewInputXml:
-    def test_plural_units_include_all_source_and_target_forms(self):
-        po = _po(
-            "#: src/a.py:1\n"
-            'msgid "apple %d"\n'
-            'msgid_plural "apples %d"\n'
-            'msgstr[0] "苹果 %d"\n'
-            'msgstr[1] "苹果们"\n'
-        )
-        xml = build_review_input_xml([po.units[0]], [UnitQAReport(index=1)])
+def test_translation_task_recovers_prose_misplaced_in_profile():
+    guidance = "软件/移动应用界面; 除非有通用译名, 否则保留产品名。"
+    task = TranslationTask.model_validate({
+        "input_path": "messages.po",
+        "output_path": "translated.po",
+        "profile": guidance,
+    })
 
-        assert "apple %d" in xml
-        assert "apples %d" in xml
-        assert "苹果 %d" in xml
-        assert "苹果们" in xml
-        assert "sources" in xml
-        assert "targets" in xml
+    assert task.profile == "full"
+    assert task.instructions == guidance

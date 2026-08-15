@@ -14,10 +14,10 @@ from pydantic_ai.capabilities import PrefixTools, Toolset
 from pydantic_ai_harness.subagents import SubAgent, SubAgents
 from translate.lang import data as lang_data
 
-from aitran.agents.workflows import (
-    build_review_workflow_agent,
-    build_translation_workflow_agent,
-)
+from aitran.agents.reviewer import TASK_CONTRACT as REVIEW_TASK_CONTRACT
+from aitran.agents.reviewer import build_review_file_agent
+from aitran.agents.translator import TASK_CONTRACT as TRANSLATION_TASK_CONTRACT
+from aitran.agents.translator import build_translation_file_agent
 from aitran.toolsets._base import OrchestratorDeps
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ Workflow guidelines:
    - Review the translated file.
    - Upload the translated file back to the platform.
    - Treat file paths as a strict pipeline: use each tool/subagent result's
-     `output_path` as the next step's `input_file` or upload `file_path`.
+     `output_path` as the next step's `input_path` or upload `file_path`.
    - Never infer the next path from a naming convention and never upload an earlier
      pipeline input when a later `output_path` was returned.
    - For Weblate uploads, use `conflicts=replace-translated` when the translated or
@@ -69,12 +69,17 @@ Workflow guidelines:
    - Delegate local file work with `delegate_task`: choose `translator` for
      translation and `reviewer` for review. Give the subagent a self-contained JSON
      task containing all arguments it needs.
-   - Translator task keys are `input_file`, `output_file`, `source_language`,
-     `target_language`, `context_file`, `batch_size`, `jobs`, `order`, and `profile`.
-   - Reviewer task keys are `input_file`, `output_file`, `source_language`,
-     `target_language`, `batch_size`, `strict`, and `auto_fix`.
-   - The translator and reviewer only support PO/XLIFF files or directories
-     containing those files.
+   - Translator task contract:
+{translator_task_contract}
+   - Reviewer task contract:
+{reviewer_task_contract}
+   - Never place free-form user requirements in enum/configuration fields such as
+     `profile`, `scope`, or `order`. Copy them into `instructions` instead.
+   - Use `scope=pending` unless the user explicitly requests repairing or
+     retranslating existing targets. Use `profile=full` unless minimizing metadata
+     is explicitly useful; `profile` is not a translation style.
+   - Both paths are required. The translator and reviewer support individual
+     PO/XLIFF files, not directories.
    - Do not download JSON, YAML, or other native source formats for this workflow.
    - For Weblate downloads, prefer `.po` when both PO and XLIFF are available because
      support is best.
@@ -102,7 +107,15 @@ def _build_orchestrator_system_prompt() -> str:
         Full system prompt text for the orchestrator agent.
     """
     supported_codes = ", ".join(sorted(lang_data.languages))
-    return SYSTEM_PROMPT + "\n\n" + USER_PROMPT.format(supported_codes=supported_codes)
+    return (
+        SYSTEM_PROMPT
+        + "\n\n"
+        + USER_PROMPT.format(
+            supported_codes=supported_codes,
+            translator_task_contract=TRANSLATION_TASK_CONTRACT,
+            reviewer_task_contract=REVIEW_TASK_CONTRACT,
+        )
+    )
 
 
 class _ApprovalRequiredSubAgents(SubAgents[OrchestratorDeps]):
@@ -122,22 +135,26 @@ def build_orchestrator_agent(
     model: Model,
     *,
     worker_model: Model | None = None,
+    translator_model: Model | None = None,
+    reviewer_model: Model | None = None,
 ) -> Agent[OrchestratorDeps, str | DeferredToolRequests]:
     """Build the orchestrator agent with all toolsets.
 
     Args:
         model: Pydantic AI model instance for the orchestrator.
-        worker_model: Model used by translation and review workflow subagents.
-            Defaults to the orchestrator model.
+        worker_model: Deprecated shared fallback for both subagents.
+        translator_model: Model used by the translator subagent.
+        reviewer_model: Model used by the reviewer subagent.
 
     Returns:
         Configured orchestrator agent.
     """
     from aitran.toolsets import crowdin_toolset, weblate_toolset
 
-    worker_model = worker_model or model
-    translator = build_translation_workflow_agent(worker_model)
-    reviewer = build_review_workflow_agent(worker_model)
+    translator_model = translator_model or worker_model or model
+    reviewer_model = reviewer_model or worker_model or translator_model
+    translator = build_translation_file_agent(translator_model)
+    reviewer = build_review_file_agent(reviewer_model)
 
     subagents = _ApprovalRequiredSubAgents(
         agents=[SubAgent(translator), SubAgent(reviewer)],

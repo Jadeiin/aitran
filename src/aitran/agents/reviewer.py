@@ -1,218 +1,108 @@
-"""Reviewer agent — reviews translated PO/XLIFF units using QA context + LLM."""
+"""Reviewer Agent that owns a complete paginated file task."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelRetry, RunContext, format_as_xml
+from pydantic_ai import Agent, ModelRetry, RunContext
+from pydantic_ai.messages import ToolReturnPart
+from pydantic_ai.toolsets import DynamicToolset
 
-from aitran.agents._base import build_unit_prompt_fields, format_language_label
+from aitran.agent_work import ReviewResult as ReviewedUnit
+from aitran.agent_work import review_toolset
+from aitran.toolsets._base import OrchestratorDeps
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model
 
-    from aitran.qa import UnitQAReport
+TASK_CONTRACT = """\
+Review exactly one translated PO/XLIFF file. The task must be a JSON object:
+{
+  "input_path": string,          // required translated .po/.pot/.xliff/.xlf
+  "output_path": string,         // required exact reviewed artifact destination
+  "source_language": string,     // default "en"
+  "target_language": string,     // required unless inferable from the file
+  "max_page_units": integer > 0, // default 100
+  "max_page_chars": integer > 0, // default 4096
+  "instructions": string         // optional free-form review guidance
+}
+Put domain, tone, terminology, product, and other free-form requirements only in
+`instructions`.
+"""
 
-# ---------------------------------------------------------------------------
-# Prompts
-# ---------------------------------------------------------------------------
+SYSTEM_PROMPT = """\
+You are a translation quality reviewer responsible for completing exactly one
+JSON PO/XLIFF file task. Follow any task `instructions` and inspect every translation
+returned by the tool, not only units with automated QA findings.
 
-SYSTEM_PROMPT = (
-    "You are a translation quality reviewer. You will evaluate existing "
-    "translations against their source text and any QA rule violations "
-    "detected by automated checkers. Your goal is to identify real problems "
-    "and provide corrections when possible."
-)
+Workflow and output:
+1. Retrieve the next bounded page with the single available retrieval tool.
+2. Submit only problematic units with the exact `batch_id`. Omission means pass.
+3. Use `revise` for an issue you can correct and always provide the complete final
+   `corrected` target. Use `reject` for a serious issue requiring human/product
+   judgment; provide a correction when safe, otherwise leave it null and explain.
+4. Repeat until `finish_review` appears, call it, and return its artifact JSON
+   verbatim. Never invent paths, batch IDs, or indices.
 
-USER_PROMPT = """\
-Review guidelines:
+Review rules:
+- Check meaning accuracy, completeness, naturalness, grammar, terminology and tone
+  consistency, cultural appropriateness, and suitability for the supplied product
+  context.
+- Verify all placeholders, markup, escapes, accelerator markers, whitespace, line
+  breaks, and punctuation against the source. Corrections must preserve functional
+  formatting and must not XML-escape final text.
+- Inspect every singular/plural source and target form in order. If a plural issue
+  cannot be represented safely by one corrected target, reject it with an actionable
+  note for human retranslation.
+- Treat automated QA findings as evidence, not verdicts. Critical functional errors
+  such as placeholder, printf, XML-tag, or escape mismatches are usually real.
+  Cosmetic findings such as brackets, capitalization, or ending punctuation may be
+  valid target-language choices. Omit a unit when the QA finding is a false positive.
+- Use context, locations, notes, flags, current targets, and task instructions when
+  deciding whether wording is intentional. Do not replace a correct translation just
+  to express a stylistic preference.
+- Notes must be brief, specific, and actionable. Explain the defect or required human
+  decision; do not narrate routine passes.
 
-1. **Verdict** — For each problematic unit, assign exactly one of:
-   - `revise` — Minor issue found; provide a `corrected` target.
-   - `reject` — Serious issue found. If you can fix it, provide `corrected`;
-     if the problem requires human retranslation (e.g. the meaning is
-     fundamentally wrong), leave `corrected` as null.
-
-   **Only return units with problems.** If a translation is correct and
-   natural, simply omit it from the output — it is implicitly accepted.
-
-2. **Evaluating QA errors** — Automated checkers report violations with
-   severity levels (critical / functional / cosmetic / extraction). Treat
-   them as signals, not verdicts:
-   - Critical errors (printf, xmltags, escapes) are almost always real.
-   - Cosmetic errors (brackets, endpunc, caps) may be intentional style
-     choices in the target language — use your judgment.
-   - If a QA error is a false positive, omit that unit from the output.
-
-3. **Beyond QA errors** — Also check for:
-   - Meaning accuracy: does the target convey the source intent?
-   - Naturalness: does the target read like native text?
-   - Consistency: are similar terms translated consistently?
-   - Cultural appropriateness: any offensive or awkward phrasing?
-
-4. **Notes** — Use the `note` field to explain your reasoning. Keep notes
-   brief and actionable.
-
-5. **Output format** — Only include units that need revision or rejection.
-   Do not invent indices that were not requested. The output list may be
-   empty if all translations are acceptable.
-
-Do not answer questions or explain concepts. Review only."""
-
-
-# ---------------------------------------------------------------------------
-# Output schema
-# ---------------------------------------------------------------------------
-
-
-class ReviewedUnit(BaseModel):
-    """One review result produced by the agent."""
-
-    index: int = Field(description="Index matching the requested unit.")
-    verdict: Literal["revise", "reject"] = Field(
-        description=(
-            "Review verdict: 'revise' (minor issue, has correction) "
-            "or 'reject' (serious issue)."
-        ),
-    )
-    corrected: str | None = Field(
-        default=None,
-        description=(
-            "Corrected target text. Present when verdict is 'revise' or "
-            "'reject' and the reviewer can provide a fix. Null when the "
-            "translation needs human retranslation."
-        ),
-    )
-    note: str | None = Field(
-        default=None,
-        description=(
-            "Brief explanation of the verdict, especially for non-pass "
-            "results. Helps human reviewers understand the issue."
-        ),
-    )
+Do not answer questions or provide a prose report. Perform the review workflow only.
+"""
 
 
-class ReviewBatch(BaseModel):
-    """Container for a batch of review results."""
-
-    units: list[ReviewedUnit]
-
-
-# ---------------------------------------------------------------------------
-# Dependencies
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ReviewDeps:
-    """Per-run context available to the reviewer subagent and its tools."""
-
-    source_lang: str
-    target_lang: str
-    context: str
-    expected_indices: tuple[int, ...]
-    batch_xml: str = ""
-    batch_retrieved: bool = False
-
-
-def build_review_input_xml(
-    units: list,
-    qa_reports: list[UnitQAReport],
-) -> str:
-    """Build XML input for the reviewer agent.
-
-    Each unit includes source, target, and any QA errors. Plural units use
-    ``sources`` and ``targets`` list fields so all forms are visible.
+def build_review_file_agent(model: Model) -> Agent[OrchestratorDeps, str]:
+    """Build the reviewer used by Harness and headless CLI.
 
     Returns:
-        XML string with a root ``<review-batch>`` element.
+        Complete-file reviewer Agent.
     """
-    items: list[dict] = []
-    for unit, report in zip(units, qa_reports, strict=True):
-        d = build_unit_prompt_fields(
-            unit,
-            report.index,
-            include_target=True,
-            force_plural=True,
-        )
-        if report.has_errors:
-            d["qa-errors"] = "; ".join(
-                f"[{e.severity}] {e.checker}: {e.message}" for e in report.errors
-            )
-        items.append(d)
-
-    return format_as_xml(items, root_tag="review-batch", item_tag="unit")
-
-
-# ---------------------------------------------------------------------------
-# Agent builder
-# ---------------------------------------------------------------------------
-
-
-def build_reviewer_agent(model: Model) -> Agent[ReviewDeps, ReviewBatch]:
-    """Build the tool-using reviewer subagent.
-
-    Returns:
-        A configured Pydantic AI Agent with output validation.
-    """
-    agent = Agent[ReviewDeps, ReviewBatch](
+    agent = Agent[OrchestratorDeps, str](
         model,
-        name="aitran-reviewer",
-        deps_type=ReviewDeps,
-        output_type=ReviewBatch,
-        instructions=SYSTEM_PROMPT + "\n\n" + USER_PROMPT,
-        retries={"output": 3},
+        name="reviewer",
+        description=TASK_CONTRACT,
+        deps_type=OrchestratorDeps,
+        instructions=SYSTEM_PROMPT,
+        toolsets=[DynamicToolset(review_toolset, per_run_step=False)],
     )
-
-    @agent.tool
-    def get_review_batch(ctx: RunContext[ReviewDeps]) -> str:
-        """Retrieve the translated units assigned to this subagent run.
-
-        Returns:
-            XML containing indexed sources, targets, and QA findings.
-        """
-        ctx.deps.batch_retrieved = True
-        return ctx.deps.batch_xml
-
-    @agent.instructions
-    def task_context(ctx: RunContext[ReviewDeps]) -> str:
-        source_label = format_language_label(ctx.deps.source_lang)
-        target_label = format_language_label(ctx.deps.target_lang)
-        parts = [
-            f"Review translations from `{source_label}` to `{target_label}` "
-            f"(XPG/POSIX locale names used in Unix-like systems and GNU Gettext).",
-            "Call `get_review_batch` before producing output. The review units "
-            "are available only through that tool.",
-        ]
-        if ctx.deps.context:
-            parts.append(f"File context: {ctx.deps.context}")
-        return "\n\n".join(parts)
 
     @agent.output_validator
-    def check_completeness(
-        ctx: RunContext[ReviewDeps], output: ReviewBatch
-    ) -> ReviewBatch:
-        if ctx.partial_output:
-            return output
-        valid_indices = set(ctx.deps.expected_indices)
-        extra = {u.index for u in output.units} - valid_indices
-        if extra:
-            raise ModelRetry(
-                f"Unexpected indices {sorted(extra)}. "
-                f"Only return units from the requested set."
-            )
-        # Reviewer output is intentionally sparse: units without problems
-        # are simply omitted rather than returned with a "pass" verdict.
-        # We only check for extra indices, not missing ones.
-        valid_verdicts = {"revise", "reject"}
-        for u in output.units:
-            if u.verdict not in valid_verdicts:
-                raise ModelRetry(
-                    f"Invalid verdict {u.verdict!r} for index {u.index}. "
-                    f"Must be one of: {', '.join(sorted(valid_verdicts))}"
-                )
-        return output
+    def require_finished_file(ctx: RunContext[OrchestratorDeps], _output: str) -> str:
+        for message in reversed(ctx.messages):
+            for part in reversed(message.parts):
+                if (
+                    isinstance(part, ToolReturnPart)
+                    and part.tool_name == "finish_review"
+                ):
+                    return str(part.content)
+        raise ModelRetry("Call finish_review before returning")
 
     return agent
+
+
+build_reviewer_agent = build_review_file_agent
+
+__all__ = [
+    "SYSTEM_PROMPT",
+    "TASK_CONTRACT",
+    "ReviewedUnit",
+    "build_review_file_agent",
+    "build_reviewer_agent",
+]

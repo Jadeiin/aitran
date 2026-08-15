@@ -1,13 +1,19 @@
 """CLI entry point using click."""
 
+from __future__ import annotations
+
 import json
 import sys
 from contextlib import contextmanager
 from importlib.resources import files
+from threading import Lock
+from typing import TYPE_CHECKING
 
 import click
 from crowdin_api.exceptions import CrowdinException
 from requests import RequestException
+from rich.console import Console
+from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
 from wlc.client import WeblateException
 
 from aitran.crowdin import download_translation as crowdin_download_translation
@@ -16,6 +22,7 @@ from aitran.crowdin import list_files as crowdin_list_files
 from aitran.crowdin import list_languages as crowdin_list_languages
 from aitran.crowdin import list_projects as crowdin_list_projects
 from aitran.crowdin import upload_translation as crowdin_upload_translation
+from aitran.headless import review_file, translate_directory, translate_file
 from aitran.manipulate import remove_by_options
 from aitran.observability import (
     ObservabilityError,
@@ -24,14 +31,7 @@ from aitran.observability import (
     setup_logfire,
     setup_mlflow,
 )
-from aitran.review import review_file
 from aitran.sync import sync
-from aitran.translate import (
-    translate_po,
-    translate_po_dir,
-    translate_xliff_dir,
-    translate_xliff_file,
-)
 from aitran.utils import (
     copy_file_if_not_exists,
     find_config,
@@ -42,6 +42,11 @@ from aitran.weblate import download_translation as weblate_download_translation
 from aitran.weblate import get_stats as weblate_get_stats
 from aitran.weblate import list_objects as weblate_list_objects
 from aitran.weblate import upload_translation as weblate_upload_translation
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
+    from aitran.agent_work import BatchProgress
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 WEBLATE_UPLOAD_METHODS = [
@@ -56,6 +61,42 @@ WEBLATE_UPLOAD_METHODS = [
 WEBLATE_FUZZY_CHOICES = ["process", "approve"]
 WEBLATE_CONFLICT_CHOICES = ["ignore", "replace-translated", "replace-approved"]
 WEBLATE_DOWNLOAD_FORMATS = ["po", "xliff11", "xliff"]
+
+
+@contextmanager
+def _progress_reporter() -> Iterator[Callable[[str, BatchProgress], None]]:
+    """Render all headless Agent files in one thread-safe Rich display.
+
+    Yields:
+        Callback suitable for the headless Agent adapters.
+    """
+    lock = Lock()
+    task_ids: dict[str, int] = {}
+    progress = Progress(
+        TextColumn("[cyan]{task.description}"),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("{task.completed:.0f}/{task.total:.0f}"),
+        console=Console(stderr=True),
+    )
+    progress.live.vertical_overflow = "crop"
+
+    def report(path: str, update: BatchProgress) -> None:
+        with lock:
+            task_id = task_ids.get(path)
+            if task_id is None:
+                task_id = progress.add_task(path, total=update.total)
+                task_ids[path] = task_id
+            progress.update(
+                task_id,
+                completed=update.accepted,
+                total=update.total,
+                refresh=True,
+            )
+
+    with progress:
+        yield report
 
 
 def _weblate_auth_options(command):
@@ -284,28 +325,49 @@ def _observability(
 )
 @click.option(
     "--translate-model",
-    envvar="AITRAN_MODEL",
+    envvar=["AITRAN_TRANSLATOR_MODEL", "AITRAN_MODEL"],
     default="deepseek:deepseek-v4-flash",
     show_default=True,
-    help="Model for translation/review tasks",
+    help="Model for translation tasks",
 )
 @click.option(
     "--translate-key",
-    envvar="AITRAN_API_KEY",
+    envvar=["AITRAN_TRANSLATOR_KEY", "AITRAN_API_KEY"],
     help="API key for the translation model",
 )
 @click.option(
     "--translate-host",
-    envvar="AITRAN_API_HOST",
+    envvar=["AITRAN_TRANSLATOR_HOST", "AITRAN_API_HOST"],
     help="Custom API base URL for the translation model",
 )
 @click.option(
     "--translate-temperature",
-    envvar="AITRAN_MODEL_TMP",
+    envvar=["AITRAN_TRANSLATOR_TMP", "AITRAN_MODEL_TMP"],
     type=float,
     default=0.1,
     show_default=True,
-    help="LLM temperature for translation/review tasks.",
+    help="LLM temperature for translation tasks.",
+)
+@click.option(
+    "--review-model",
+    envvar="AITRAN_REVIEWER_MODEL",
+    help="Reviewer model; defaults to the translator model.",
+)
+@click.option(
+    "--review-key",
+    envvar="AITRAN_REVIEWER_KEY",
+    help="Reviewer API key; defaults to the translator key.",
+)
+@click.option(
+    "--review-host",
+    envvar="AITRAN_REVIEWER_HOST",
+    help="Reviewer API host; defaults to the translator host.",
+)
+@click.option(
+    "--review-temperature",
+    envvar="AITRAN_REVIEWER_TMP",
+    type=float,
+    help="Reviewer temperature; defaults to the translator temperature.",
 )
 @click.option(
     "--web-host",
@@ -339,6 +401,10 @@ def app(
     translate_key: str | None,
     translate_host: str | None,
     translate_temperature: float,
+    review_model: str | None,
+    review_key: str | None,
+    review_host: str | None,
+    review_temperature: float | None,
     web_host: str,
     web_port: int,
     logfire: bool,
@@ -376,6 +442,10 @@ def app(
             translate_api_key=translate_key,
             translate_api_host=translate_host,
             translate_temperature=translate_temperature,
+            review_model=review_model,
+            review_api_key=review_key,
+            review_api_host=review_host,
+            review_temperature=review_temperature,
         )
         run_web_app(
             orchestrator_model=orchestrator_model,
@@ -433,7 +503,7 @@ def app(
 )
 @click.option("-src", "--source", default="en", help="Source language (ISO 639-1)")
 @click.option("-l", "--lang", help="Target language (ISO 639-1)")
-@click.option("-v", "--verbose", is_flag=True, help="Print each translation")
+@click.option("-v", "--verbose", is_flag=True, help="Print artifact JSON")
 @click.option(
     "--context",
     "context_file",
@@ -441,10 +511,26 @@ def app(
     help="Text file with additional translation context",
 )
 @click.option(
+    "--max-page-units",
     "--batch-size",
-    type=int,
+    "max_page_units",
+    type=click.IntRange(min=1),
     default=100,
-    help="Max units per API batch",
+    help="Max units per translator retrieval page",
+)
+@click.option(
+    "--max-page-chars",
+    type=click.IntRange(min=1),
+    default=4096,
+    show_default=True,
+    help="Max source/target characters per translator retrieval page",
+)
+@click.option(
+    "--scope",
+    type=click.Choice(["pending", "repair", "all"]),
+    default="pending",
+    show_default=True,
+    help="Translation selection scope",
 )
 @click.option(
     "--jobs",
@@ -472,9 +558,14 @@ def app(
     default="full",
     show_default=True,
     help=(
-        "Prompt detail level: fast (index + source only), "
+        "Prompt detail level: fast (minimal unit fields), "
         "full (all metadata: context, location, note, flag)"
     ),
+)
+@click.option(
+    "--instructions",
+    default="",
+    help="Free-form domain, tone, terminology, or product guidance",
 )
 @click.option(
     "-o",
@@ -496,10 +587,13 @@ def translate(
     lang: str | None,
     verbose: bool,
     context_file: str | None,
-    batch_size: int,
+    max_page_units: int,
+    max_page_chars: int,
+    scope: str,
     jobs: int,
     order: str,
     profile: str,
+    instructions: str,
     output: str | None,
     logfire: bool,
     logfire_capture_http: bool,
@@ -523,52 +617,60 @@ def translate(
         )
         sys.exit(1)
 
-    with _observability(
-        logfire=logfire,
-        logfire_capture_http=logfire_capture_http,
-        mlflow=mlflow,
-        mlflow_tracking_uri=mlflow_tracking_uri,
-        mlflow_experiment=mlflow_experiment,
+    with (
+        _observability(
+            logfire=logfire,
+            logfire_capture_http=logfire_capture_http,
+            mlflow=mlflow,
+            mlflow_tracking_uri=mlflow_tracking_uri,
+            mlflow_experiment=mlflow_experiment,
+        ),
+        _progress_reporter() as report_progress,
     ):
         kwargs = {
             "model": model,
             "source_lang": source,
             "target_lang": lang or "",
-            "verbose": verbose,
             "context_file": context_file,
-            "batch_size": batch_size,
+            "max_page_units": max_page_units,
+            "max_page_chars": max_page_chars,
+            "scope": scope,
             "api_key": key,
             "api_host": host,
             "temperature": temperature,
+            "on_progress": report_progress,
+            "instructions": instructions,
         }
 
         if po_file:
-            translate_po(
-                po_path=po_file,
+            artifact = translate_file(
+                input_path=po_file,
                 output_path=output or po_file,
                 order=order,
                 profile=profile,
                 **kwargs,
             )
         elif po_dir:
-            translate_po_dir(
+            artifact = translate_directory(
                 dir_path=po_dir,
+                suffixes=(".po",),
                 jobs=jobs,
                 order=order,
                 profile=profile,
                 **kwargs,
             )
         elif xliff_file:
-            translate_xliff_file(
-                xliff_path=xliff_file,
+            artifact = translate_file(
+                input_path=xliff_file,
                 output_path=output or xliff_file,
                 order=order,
                 profile=profile,
                 **kwargs,
             )
         elif xliff_dir:
-            translate_xliff_dir(
+            artifact = translate_directory(
                 dir_path=xliff_dir,
+                suffixes=(".xliff", ".xlf"),
                 jobs=jobs,
                 order=order,
                 profile=profile,
@@ -577,6 +679,8 @@ def translate(
         else:
             click.echo("No actionable target specified.", err=True)
             sys.exit(1)
+        if verbose:
+            click.echo(json.dumps(artifact, ensure_ascii=False, indent=2))
 
 
 @app.command(
@@ -587,7 +691,7 @@ def translate(
 @click.option(
     "-m",
     "--model",
-    envvar="AITRAN_MODEL",
+    envvar=["AITRAN_REVIEWER_MODEL", "AITRAN_MODEL"],
     default="deepseek:deepseek-v4-flash",
     help=(
         "Model in <provider>:<model> format "
@@ -595,13 +699,20 @@ def translate(
     ),
 )
 @click.option(
-    "-k", "--key", envvar="AITRAN_API_KEY", help="API key for the LLM provider"
+    "-k",
+    "--key",
+    envvar=["AITRAN_REVIEWER_KEY", "AITRAN_API_KEY"],
+    help="API key for the LLM provider",
 )
-@click.option("--host", envvar="AITRAN_API_HOST", help="Custom API base URL")
+@click.option(
+    "--host",
+    envvar=["AITRAN_REVIEWER_HOST", "AITRAN_API_HOST"],
+    help="Custom API base URL",
+)
 @click.option(
     "-t",
     "--temperature",
-    envvar="AITRAN_MODEL_TMP",
+    envvar=["AITRAN_REVIEWER_TMP", "AITRAN_MODEL_TMP"],
     type=float,
     default=0.1,
     help="LLM temperature (0.0-2.0)",
@@ -616,20 +727,24 @@ def translate(
 @click.option("-src", "--source", default="en", help="Source language (ISO 639-1)")
 @click.option("-l", "--lang", help="Target language (ISO 639-1)")
 @click.option(
+    "--max-page-units",
     "--batch-size",
-    type=int,
+    "max_page_units",
+    type=click.IntRange(min=1),
     default=100,
-    help="Max units per review batch",
+    help="Max units per reviewer retrieval page",
 )
 @click.option(
-    "--strict",
-    is_flag=True,
-    help="Review all units (default: only units with QA errors or markers)",
+    "--max-page-chars",
+    type=click.IntRange(min=1),
+    default=4096,
+    show_default=True,
+    help="Max source/target characters per reviewer retrieval page",
 )
 @click.option(
-    "--auto-fix",
-    is_flag=True,
-    help="Write corrected targets back to the file",
+    "--instructions",
+    default="",
+    help="Free-form domain, tone, terminology, or product review guidance",
 )
 @click.option(
     "-o",
@@ -647,9 +762,9 @@ def review(
     xliff_file: str | None,
     source: str,
     lang: str | None,
-    batch_size: int,
-    strict: bool,
-    auto_fix: bool,
+    max_page_units: int,
+    max_page_chars: int,
+    instructions: str,
     output: str | None,
     logfire: bool,
     logfire_capture_http: bool,
@@ -669,35 +784,40 @@ def review(
         click.echo("Error: --po and --xliff are mutually exclusive", err=True)
         sys.exit(1)
 
-    with _observability(
-        logfire=logfire,
-        logfire_capture_http=logfire_capture_http,
-        mlflow=mlflow,
-        mlflow_tracking_uri=mlflow_tracking_uri,
-        mlflow_experiment=mlflow_experiment,
+    with (
+        _observability(
+            logfire=logfire,
+            logfire_capture_http=logfire_capture_http,
+            mlflow=mlflow,
+            mlflow_tracking_uri=mlflow_tracking_uri,
+            mlflow_experiment=mlflow_experiment,
+        ),
+        _progress_reporter() as report_progress,
     ):
         review_path: str = po_file or xliff_file  # guaranteed by mutual-exclusion check
-        summary = review_file(
+        artifact = review_file(
             model=model,
             path=review_path,
             source_lang=source,
             target_lang=lang or "",
             output_path=output or review_path,
-            batch_size=batch_size,
-            strict=strict,
-            auto_fix=auto_fix,
+            max_page_units=max_page_units,
+            max_page_chars=max_page_chars,
             api_key=key,
             api_host=host,
             temperature=temperature,
+            on_progress=report_progress,
+            instructions=instructions,
         )
 
+    summary = artifact.get("summary") or {}
     total = sum(summary.values())
     click.echo(
         f"\nReviewed: {total} units\n"
         f"  pass:   {summary.get('pass', 0)}\n"
         f"  revise: {summary.get('revise', 0)}\n"
         f"  reject: {summary.get('reject', 0)}\n"
-        f"  skip:   {summary.get('skip', 0)}"
+        f"Output: {artifact['output_path']}"
     )
 
 
