@@ -5,6 +5,7 @@ import json
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import FunctionModel
 
+from aitran.agent_work import TranslationTask, _translation_state
 from aitran.agents.reviewer import build_review_file_agent
 from aitran.agents.translator import build_translation_file_agent
 from aitran.toolsets._base import OrchestratorDeps
@@ -19,6 +20,23 @@ def _write_po(path, entries):
     for source, target in entries:
         body += f'msgid "{source}"\nmsgstr "{target}"\n\n'
     path.write_text(body, encoding="utf-8")
+
+
+def test_pending_translation_ignores_obsolete_untranslated_units(tmp_path):
+    input_path = tmp_path / "messages.po"
+    _write_po(input_path, [("Hello", "")])
+    with input_path.open("a", encoding="utf-8") as po_file:
+        po_file.write('#~ msgid "Removed"\n#~ msgstr ""\n')
+
+    state = _translation_state(
+        TranslationTask(
+            input_path=str(input_path),
+            output_path=str(tmp_path / "translated.po"),
+            target_language="zh_CN",
+        )
+    )
+
+    assert [str(unit.source) for _, unit in state.items] == ["Hello"]
 
 
 async def test_translator_pages_file_and_returns_exact_artifact(tmp_path):

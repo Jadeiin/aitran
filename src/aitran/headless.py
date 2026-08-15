@@ -179,9 +179,9 @@ def translate_directory(
         for name in sorted(os.listdir(dir_path))
         if name.endswith(suffixes)
     ]
-    agent = _translation_agent(model, api_key, api_host, temperature)
 
     def run_path(path: str) -> dict[str, Any]:
+        agent = _translation_agent(model, api_key, api_host, temperature)
         return _run(
             agent,
             {

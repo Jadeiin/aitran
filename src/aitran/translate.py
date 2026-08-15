@@ -106,7 +106,7 @@ class PoTranslator:
         result: list[po.pounit] = []
         plural_tags = po_file.get_plural_tags()
         for unit in po_file.units:
-            if unit.isheader():
+            if unit.isheader() or unit.isobsolete():
                 continue
             if unit.istranslated() and not unit.isfuzzy():
                 # istranslated only checks singular form;
