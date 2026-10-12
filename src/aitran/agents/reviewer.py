@@ -61,6 +61,9 @@ Review rules:
 - Use context, locations, notes, flags, current targets, and task instructions when
   deciding whether wording is intentional. Do not replace a correct translation just
   to express a stylistic preference.
+- Check every source form against the supplied `glossary`. Preserve its specified
+  target terms when already correct; revise terminology that conflicts with them
+  while keeping the surrounding sentence natural and preserving placeholders.
 - Notes must be brief, specific, and actionable. Explain the defect or required human
   decision; do not narrate routine passes.
 

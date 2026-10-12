@@ -237,10 +237,23 @@ aitran remove --po <file> [filters]
 aitran userdict [-l <lang>] [--explore]
 ```
 
-Open or explore user dictionaries. Dictionaries are stored in the
-platform-standard config directory (XDG-compliant). Name them
-`dictionary-<lang>.json` (e.g. `dictionary-zh.json`) and place them
-in `.aitran/` under CWD, git root, or the config directory.
+Open or explore user dictionaries. For each filename, lookup checks
+`$CWD/.aitran/`, then the git root's `.aitran/`, then the platform-standard
+user config directory (directly, without an extra `.aitran/` subdirectory).
+The first existing file wins; a `dictionary.json` in the repository root
+is an example file and is not loaded automatically.
+
+`dictionary.json` supplies defaults for every target language.
+`dictionary-<lang>.json` overrides entries with the same source key. The suffix
+must match the normalized target language: lowercase, with underscores changed
+to hyphens (`zh_CN` uses `dictionary-zh-cn.json`, `zh_Hans` uses
+`dictionary-zh-hans.json`). There is no fallback from `zh_CN` to
+`dictionary-zh.json`. Use `aitran userdict -l zh_CN` to open the matching file.
+
+Both translator and reviewer pages include matching entries in `glossary`.
+Matching is case-insensitive, checks every singular/plural source form, and
+includes only terms found as substrings in the current page. Invalid JSON or
+non-string mappings are skipped with a warning naming the file.
 
 Example `dictionary-zh.json`:
 

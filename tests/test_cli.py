@@ -7,6 +7,26 @@ from aitran import cli
 from aitran.agent_work import BatchProgress
 
 
+def test_userdict_opens_the_dictionary_used_for_normalized_language(
+    monkeypatch, tmp_path
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "platformdirs.user_config_dir", lambda *_args, **_kwargs: str(tmp_path)
+    )
+    config_dir = tmp_path / ".aitran"
+    config_dir.mkdir()
+    dictionary_path = config_dir / "dictionary-zh-cn.json"
+    dictionary_path.write_text('{"hello": "你好"}', encoding="utf-8")
+    opened = []
+    monkeypatch.setattr(cli, "open_file_by_default", opened.append)
+
+    result = CliRunner().invoke(cli.app, ["userdict", "-l", "zh_CN"], env={})
+
+    assert result.exit_code == 0
+    assert opened == [str(dictionary_path)]
+
+
 def test_headless_progress_is_written_to_stderr(capsys):
     with cli._progress_reporter() as report:
         report(

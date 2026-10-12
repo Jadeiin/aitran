@@ -159,6 +159,7 @@ class ReviewPage(BaseModel):
     total: int
     source_language: str
     target_language: str
+    glossary: list[dict[str, str]]
     units: list[UnitView]
 
 
@@ -351,6 +352,15 @@ def _visible(state: Any, stage: str):
     return prepare
 
 
+def _glossary(units: list[UnitView], target_language: str) -> list[dict[str, str]]:
+    return [
+        {"source": source, "target": target}
+        for source, target in find_matching_entries(
+            [source for unit in units for source in unit.sources], target_language
+        )
+    ]
+
+
 def _translation_state(task: TranslationTask) -> _TranslationState:
     from aitran.translate import (
         PoTranslator,
@@ -439,12 +449,14 @@ def translation_toolset(
         current_items = state.items[state.cursor : stop]
         state.current = _Page(uuid.uuid4().hex, current_items)
         state.stage = "submit"
-        units = [unit for _, unit in current_items]
-        glossary = [
-            {"source": source, "target": target}
-            for source, target in find_matching_entries(
-                [unit.source for unit in units], state.target_language
+        units = [
+            _view(
+                index,
+                unit,
+                include_target=True,
+                include_metadata=task.profile == "full",
             )
+            for index, unit in current_items
         ]
         return TranslationPage(
             batch_id=state.current.batch_id,
@@ -453,16 +465,8 @@ def translation_toolset(
             target_language=state.target_language,
             plural_tags=state.plural_tags,
             context=state.context,
-            glossary=glossary,
-            units=[
-                _view(
-                    index,
-                    unit,
-                    include_target=True,
-                    include_metadata=task.profile == "full",
-                )
-                for index, unit in current_items
-            ],
+            glossary=_glossary(units, state.target_language),
+            units=units,
         )
 
     @tools.tool(prepare=_visible(state, "submit"))
@@ -605,15 +609,17 @@ def review_toolset(
             uuid.uuid4().hex, [(index, unit) for index, unit, _ in page_items]
         )
         state.stage = "submit"
+        units = [
+            _view(index, unit, include_target=True, report=report)
+            for index, unit, report in page_items
+        ]
         return ReviewPage(
             batch_id=state.current.batch_id,
             total=len(state.items),
             source_language=state.source_language,
             target_language=state.target_language,
-            units=[
-                _view(index, unit, include_target=True, report=report)
-                for index, unit, report in page_items
-            ],
+            glossary=_glossary(units, state.target_language),
+            units=units,
         )
 
     @tools.tool(prepare=_visible(state, "submit"))

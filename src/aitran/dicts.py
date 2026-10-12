@@ -1,17 +1,20 @@
 """Dictionary management: load per-language dictionaries and match source strings."""
 
 import json
+import logging
 import os
 
 from aitran.utils import find_config, normalize_lang_code
+
+logger = logging.getLogger(__name__)
 
 
 def load_dictionary(lang: str) -> dict[str, str]:
     """Load the dictionary for a language.
 
-    Cascading lookup:
-    1. ~/.aitran/dictionary-{lang}.json
-    2. ~/.aitran/dictionary.json (default)
+    Resolve each filename through CWD/.aitran, git root/.aitran, then the
+    platform-standard user config directory. Load dictionary.json first;
+    dictionary-{normalized-lang}.json overrides entries with the same key.
 
     Returns:
         Merged dictionary. Empty dict if no dictionary found.
@@ -21,19 +24,29 @@ def load_dictionary(lang: str) -> dict[str, str]:
     default_dict_path = find_config("dictionary.json")
 
     result: dict[str, str] = {}
-    if os.path.exists(default_dict_path):
+    paths = [default_dict_path]
+    if lang_code:
+        paths.append(lang_dict_path)
+    for path in paths:
+        if not os.path.exists(path):
+            continue
         try:
-            with open(default_dict_path, encoding="utf-8") as f:
-                result.update(json.load(f))
-        except (json.JSONDecodeError, OSError):
-            pass
-
-    if lang_code and os.path.exists(lang_dict_path):
-        try:
-            with open(lang_dict_path, encoding="utf-8") as f:
-                result.update(json.load(f))
-        except (json.JSONDecodeError, OSError):
-            pass
+            with open(path, encoding="utf-8") as f:
+                entries = json.load(f)
+        except (ValueError, OSError) as error:
+            logger.warning("Could not load dictionary %s: %s", path, error)
+            continue
+        if not isinstance(entries, dict) or not all(
+            isinstance(key, str) and key and isinstance(value, str)
+            for key, value in entries.items()
+        ):
+            logger.warning(
+                "Invalid dictionary %s: expected a JSON object mapping "
+                "non-empty source strings to target strings",
+                path,
+            )
+            continue
+        result.update(entries)
 
     return result
 

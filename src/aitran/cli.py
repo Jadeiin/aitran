@@ -35,6 +35,7 @@ from aitran.sync import sync
 from aitran.utils import (
     copy_file_if_not_exists,
     find_config,
+    normalize_lang_code,
     open_file_by_default,
     open_file_explorer,
 )
@@ -1332,7 +1333,8 @@ def userdict(explore: bool, lang: str | None) -> None:
     """Open or explore user dictionaries."""
     default_dict = str(files("aitran").parent.parent / "dictionary.json")
 
-    dict_filename = f"dictionary{'-' + lang if lang else ''}.json"
+    lang_code = normalize_lang_code(lang) if lang else ""
+    dict_filename = f"dictionary{'-' + lang_code if lang_code else ''}.json"
     dict_file = find_config(dict_filename)
 
     if explore:
